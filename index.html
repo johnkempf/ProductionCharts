@@ -262,18 +262,34 @@ canvas { display: block; }
   .info-strip .info-div { display: none !important; }
   .minitab-page { page-break-after: always; break-after: page; box-shadow: none; margin-bottom: 0; border: 1px solid #999; }
   .minitab-page:last-child { page-break-after: avoid; break-after: avoid; }
-  .minitab-title { padding: 4px 10px 2px !important; border-bottom-width: 1px; }
-  .minitab-title .main { font-size: 12px !important; }
+  .minitab-title { padding: 3px 10px 2px !important; border-bottom-width: 1px; }
+  .minitab-title .main { font-size: 11px !important; }
   .minitab-title .sub { font-size: 9px !important; }
-  .q-operator { padding: 6px 10px !important; }
-  .operator-msg { padding: 6px 10px !important; font-size: 10px !important; }
-  .operator-msg .msg-head { font-size: 11px !important; margin-bottom: 2px !important; }
+  /* Stop/Go message: much bigger and more prominent on print */
+  .q-operator { padding: 10px 12px !important; }
+  .operator-msg {
+    padding: 12px 16px !important;
+    font-size: 13px !important;
+    line-height: 1.35 !important;
+    border-width: 2px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .operator-msg .msg-head {
+    font-size: 22px !important;
+    font-weight: 800 !important;
+    margin-bottom: 6px !important;
+    letter-spacing: 0.02em !important;
+    line-height: 1.2 !important;
+  }
+  .operator-msg.fail .msg-head { color: #b01010 !important; }
+  .operator-msg.ok .msg-head { color: #0d6b0d !important; }
   .minitab-body { gap: 0; }
-  .q-tl, .q-tr { padding: 6px 10px !important; }
+  .q-tl, .q-tr { padding: 5px 10px !important; }
   .q-label { font-size: 10px !important; }
   .q-sublabel { font-size: 9px !important; }
-  .chart-note { font-size: 9px !important; margin-top: 4px !important; padding-top: 4px !important; }
-  .connector-heatmap-wrap { margin-top: 8px !important; padding: 10px !important; }
+  .chart-note { font-size: 8px !important; margin-top: 3px !important; padding-top: 3px !important; }
+  .connector-heatmap-wrap { margin-top: 6px !important; padding: 8px !important; }
   .connector-heatmap-title { font-size: 11px !important; margin-bottom: 6px !important; }
   .connector-heatmap-container { min-height: 80px !important; }
   .connector-heatmap { min-height: 80px !important; padding: 4px !important; gap: 1px !important; }
