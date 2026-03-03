@@ -518,8 +518,8 @@ function drawQQ(canvas,data){
 // ═══════════════════════════════════════════════
 function getStatus(ppk){
   if(ppk===null||isNaN(ppk)) return {level:'warn',icon:'⚠️',head:'Assessment Unavailable',body:'No lower specification limit found for this critical. Verify inputs and spec limits before running.'};
-  if(ppk>=1.33) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:'One-sided capability vs LSL is acceptable (Ppk ≥ 1.33). No machine adjustment required. Continue production.'};
-  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:'One-sided Ppk vs LSL is below threshold (Ppk < 1.33). Parts may be below the lower spec. Stop production, back out the press, and call a technician to adjust before continuing.'};
+  if(ppk>=1.33) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:'(Ppk ≥ 1.33). Pin press is acceptable.No machine adjustment required. Continue running.'};
+  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:'(Ppk < 1.33). Pins are pressed too far into the body. Stop production, call a tech to back out the press before continuing.'};
 }
 
 // ═══════════════════════════════════════════════
