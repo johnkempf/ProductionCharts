@@ -116,6 +116,81 @@ canvas { display: block; }
   border-top: 1px solid #e0e0e0; max-width: 500px;
 }
 
+/* Connector heatmap */
+.connector-heatmap-wrap {
+  margin-top: 24px; padding: 20px;
+  background: linear-gradient(145deg, #f8f9fc 0%, #eef1f8 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(30,75,143,0.12);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
+}
+.connector-heatmap-title {
+  font-size: 15px; font-weight: 700; margin-bottom: 12px; color: #1a1a2e;
+  letter-spacing: 0.02em;
+}
+.connector-heatmap-container { width: 100%; min-height: 160px; position: relative; }
+.pin-1-overlay {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border: 2px solid #1e4b8f;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e4b8f;
+  text-align: center;
+  line-height: 22px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.connector-heatmap {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 140px;
+  background: rgba(0,0,0,0.04);
+  padding: 8px;
+  border-radius: 10px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+}
+.connector-heatmap-cell {
+  background: #fff;
+  border-radius: 4px;
+  min-height: 24px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  position: relative;
+}
+.connector-heatmap-cell:hover { transform: scale(1.02); box-shadow: 0 2px 8px rgba(0,0,0,0.12); z-index: 1; }
+.connector-heatmap-cell.pin-1 {
+  box-shadow: 0 0 0 2px #1e4b8f;
+}
+.connector-heatmap-legend {
+  display: flex; align-items: center; gap: 16px; margin-top: 14px; font-size: 12px; color: #333;
+  flex-wrap: wrap;
+}
+.connector-heatmap-legend span { display: flex; align-items: center; gap: 6px; }
+.connector-heatmap-legend .swatch {
+  width: 18px; height: 14px; border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+.connector-heatmap-legend .legend-caption { font-weight: 700; color: #1a1a2e; margin-right: 4px; }
+.connector-heatmap-legend .legend-gradient-wrap { display: flex; align-items: center; }
+.connector-heatmap-legend .legend-gradient {
+  width: 80px; height: 14px; border-radius: 4px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.15);
+}
+.connector-heatmap-legend .legend-low { background: hsl(0, 85%, 45%) !important; }
+.connector-heatmap-legend .legend-mid { background: hsl(60, 85%, 45%) !important; }
+.connector-heatmap-legend .legend-high { background: hsl(120, 85%, 45%) !important; }
+.connector-heatmap-legend .legend-empty { background: #fff !important; border: 1px solid #bbb !important; }
+.connector-heatmap-legend .legend-divider { display: inline-block; width: 1px; height: 14px; background: #ccc; margin: 0 4px; }
+.pin-1-label { font-size: 10px; color: #1e4b8f; font-weight: 700; margin-top: 6px; }
+
 /* right-side stats */
 .stats-section { margin-bottom: 10px; }
 .stats-section-title {
@@ -157,16 +232,86 @@ canvas { display: block; }
 
 @media print {
   body { background: white; font-size: 11px; }
-  #shell-header { position: static !important; background: #1e4b8f !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Compact header block (blue area) so heatmap fits on one page */
+  #shell-header {
+    position: static !important; background: #1e4b8f !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    padding: 3px 10px !important;
+    flex-wrap: wrap;
+  }
+  #shell-header h1 { font-size: 11px !important; line-height: 1.2 !important; }
+  #shell-header .sub { font-size: 9px !important; opacity: 0.9; margin-top: 0 !important; }
   #shell-header .header-actions { display: none !important; }
+  #print-timestamp {
+    font-size: 8px !important;
+    margin-bottom: 2px !important;
+    padding: 0 10px !important;
+  }
   #upload-wrap  { display: none !important; }
-  #results { padding: 8px 10px; }
+  #results { padding: 4px 10px 8px !important; }
+  .info-strip {
+    box-shadow: none;
+    padding: 4px 10px !important;
+    margin-bottom: 4px !important;
+    gap: 16px !important;
+    flex-wrap: nowrap;
+  }
+  .info-strip .info-item { flex-direction: row !important; gap: 4px !important; align-items: baseline; }
+  .info-strip .info-label { font-size: 8px !important; margin-bottom: 0 !important; }
+  .info-strip .info-value { font-size: 9px !important; }
+  .info-strip .info-div { display: none !important; }
   .minitab-page { page-break-after: always; break-after: page; box-shadow: none; margin-bottom: 0; border: 1px solid #999; }
   .minitab-page:last-child { page-break-after: avoid; break-after: avoid; }
-  .info-strip { box-shadow: none; margin-bottom: 8px; }
+  .minitab-title { padding: 4px 10px 2px !important; border-bottom-width: 1px; }
+  .minitab-title .main { font-size: 12px !important; }
+  .minitab-title .sub { font-size: 9px !important; }
+  .q-operator { padding: 6px 10px !important; }
+  .operator-msg { padding: 6px 10px !important; font-size: 10px !important; }
+  .operator-msg .msg-head { font-size: 11px !important; margin-bottom: 2px !important; }
+  .minitab-body { gap: 0; }
+  .q-tl, .q-tr { padding: 6px 10px !important; }
+  .q-label { font-size: 10px !important; }
+  .q-sublabel { font-size: 9px !important; }
+  .chart-note { font-size: 9px !important; margin-top: 4px !important; padding-top: 4px !important; }
+  .connector-heatmap-wrap { margin-top: 8px !important; padding: 10px !important; }
+  .connector-heatmap-title { font-size: 11px !important; margin-bottom: 6px !important; }
+  .connector-heatmap-container { min-height: 80px !important; }
+  .connector-heatmap { min-height: 80px !important; padding: 4px !important; gap: 1px !important; }
+  .connector-heatmap-cell { min-height: 16px !important; }
+  .connector-heatmap-legend { margin-top: 6px !important; font-size: 9px !important; gap: 10px !important; }
   .operator-msg.ok   { background: #f0faf3 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .operator-msg.warn { background: #fffbf0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .operator-msg.fail { background: #fff3f3 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Heatmap: force backgrounds to print and avoid breaking across pages */
+  .connector-heatmap-wrap {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    background: #f0f2f6 !important;
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+  .connector-heatmap {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    min-height: 100px !important;
+  }
+  .connector-heatmap-cell {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+  .pin-1-overlay {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    background: #fff !important;
+    color: #1e4b8f !important;
+    border: 2px solid #1e4b8f !important;
+  }
+  .connector-heatmap-legend .swatch { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .connector-heatmap-legend .legend-gradient { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
 </style>
 </head>
@@ -312,6 +457,12 @@ function parseVertex(content){
     const ff=raw.split('\t')[0].replace(/"/g,'').trim();
     if(ff&&!ff.includes(':')){ dataStart=i; break; }
   }
+  const segs=(partPattern||'').split('-');
+  const numPositions=Math.max(1,parseInt(segs[1],10)||100);
+  const numRows=Math.max(1,parseInt(segs[4],10)||4);
+  const heatmapGrid=Array.from({length:numRows},()=>Array(numPositions).fill(null));
+  let heatmapLsl=null, heatmapUsl=null;
+
   const map={};
   for(let i=dataStart;i<lines.length;i++){
     const parts=lines[i].split('\t').map(p=>p.replace(/"/g,'').trim());
@@ -328,13 +479,29 @@ function parseVertex(content){
       if(map[gk].usl===null) map[gk].usl=r4(nom+upD);
       if(map[gk].lsl===null) map[gk].lsl=r4(nom+loD);
       if(map[gk].target===null) map[gk].target=r4(nom);
+      if(heatmapLsl===null){ heatmapLsl=r4(nom+loD); heatmapUsl=r4(nom+upD); }
+    }
+    const rm=crit.match(/R(\d+)_(\d+)$/i);
+    if(rm){
+      const rowIdx=parseInt(rm[1],10)-1, sampleIdx=parseInt(rm[2],10);
+      const posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
+      if(rowIdx>=0&&rowIdx<numRows) heatmapGrid[rowIdx][posIdx]=meas;
     }
   }
   const points=Object.values(map).filter(p=>p.data.length>0);
-  return {points,unit,partDisplay,partPattern};
+  return {points,unit,partDisplay,partPattern,heatmapGrid,heatmapRows:numRows,heatmapPositions:numPositions,heatmapLsl,heatmapUsl};
 }
 
 function r4(v){ return Math.round(v*10000)/10000; }
+function heatmapColor(value,lsl,usl){
+  if(value==null||lsl==null||usl==null) return null;
+  const range=usl-lsl;
+  if(range<=0) return 'hsl(0,0%,60%)';
+  let t=(value-lsl)/range;
+  t=Math.max(0,Math.min(1,t));
+  const hue=120*t;
+  return `hsl(${hue}, 85%, 45%)`;
+}
 function fN(v,dec=4){
   if(v===null||v===undefined||isNaN(v)) return 'N/A';
   return (Math.round(v*Math.pow(10,dec))/Math.pow(10,dec)).toFixed(dec).replace(/(\.\d*[1-9])0+$/,'$1').replace(/\.0+$/,'');
@@ -519,13 +686,13 @@ function drawQQ(canvas,data){
 function getStatus(ppk){
   if(ppk===null||isNaN(ppk)) return {level:'warn',icon:'⚠️',head:'Assessment Unavailable',body:'No lower specification limit found for this critical. Verify inputs and spec limits before running.'};
   if(ppk>=1.33) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:'(Ppk ≥ 1.33). Pin press is acceptable.No machine adjustment required. Continue running.'};
-  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:'(Ppk < 1.33). Pins are pressed too far into the body. Stop production, call a tech to back out the press before continuing.'};
+  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:'(Ppk < 1.33). Pins are pressed too far into the body. Stop production. Call a tech to adjust the press before continuing.'};
 }
 
 // ═══════════════════════════════════════════════
 //  BUILD MINITAB PAGE
 // ═══════════════════════════════════════════════
-function buildPage(point, partDisplay){
+function buildPage(point, partDisplay, heatmap){
   const {data,lsl,usl,target,name}=point;
   const n=data.length, m=mean(data), s=stdDev(data);
   const cap=lsl!==null?calcCapability(data,lsl,usl):null;
@@ -612,6 +779,49 @@ function buildPage(point, partDisplay){
   body.appendChild(qtr);
   page.appendChild(body);
 
+  if(heatmap&&heatmap.grid&&heatmap.rows&&heatmap.positions&&heatmap.lsl!=null&&heatmap.usl!=null){
+    const wrap=document.createElement('div'); wrap.className='connector-heatmap-wrap';
+    const title=document.createElement('div'); title.className='connector-heatmap-title'; title.textContent='Pin press by position (connector layout)';
+    wrap.appendChild(title);
+    const container=document.createElement('div'); container.className='connector-heatmap-container';
+    const gridEl=document.createElement('div');
+    gridEl.className='connector-heatmap';
+    gridEl.style.gridTemplateRows=`repeat(${heatmap.rows}, minmax(28px, 1fr))`;
+    gridEl.style.gridTemplateColumns=`repeat(${heatmap.positions}, minmax(0, 1fr))`;
+    for(let r=0;r<heatmap.rows;r++)
+      for(let c=0;c<heatmap.positions;c++){
+        const cell=document.createElement('div');
+        cell.className='connector-heatmap-cell'+(r===0&&c===0?' pin-1':'');
+        const v=heatmap.grid[r][c];
+        const color=heatmapColor(v,heatmap.lsl,heatmap.usl);
+        if(color){ cell.style.background=color; cell.title=v!=null?`Row ${r+1} pos ${c+1}: ${v}`:''; }
+        gridEl.appendChild(cell);
+      }
+    container.appendChild(gridEl);
+    const pin1Overlay=document.createElement('div');
+    pin1Overlay.className='pin-1-overlay';
+    pin1Overlay.setAttribute('aria-label','Pin 1');
+    pin1Overlay.textContent='1';
+    container.appendChild(pin1Overlay);
+    const pin1Label=document.createElement('div'); pin1Label.className='pin-1-label';
+    pin1Label.innerHTML='<strong>Pin 1</strong> = first position (top-left cell)';
+    container.appendChild(pin1Label);
+    wrap.appendChild(container);
+    const legend=document.createElement('div'); legend.className='connector-heatmap-legend';
+    legend.innerHTML=`
+      <span class="legend-caption">Scale:</span>
+      <span class="legend-gradient-wrap">
+        <span class="legend-gradient" style="background:linear-gradient(to right, hsl(0,85%,45%), hsl(60,85%,45%), hsl(120,85%,45%))"></span>
+      </span>
+      <span><span class="swatch legend-low" title="Low / At risk"></span> Low (at risk) — LSL ${fN(heatmap.lsl,4)}</span>
+      <span><span class="swatch legend-mid" title="Mid"></span> Mid</span>
+      <span><span class="swatch legend-high" title="High / Good"></span> High (good) — USL ${fN(heatmap.usl,4)}</span>
+      <span class="legend-divider"></span>
+      <span><span class="swatch legend-empty"></span> Not measured</span>`;
+    wrap.appendChild(legend);
+    page.appendChild(wrap);
+  }
+
   setTimeout(()=>{ drawHistogram(hc,point); },0);
   return page;
 }
@@ -633,7 +843,11 @@ function renderResults(parsed,filename){
     <div class="info-item info-note"><span class="info-label">Note</span><span class="info-value">Please staple this chart to the back of the shop.</span></div>
   `;
   div.appendChild(strip);
-  points.forEach(p=>div.appendChild(buildPage(p,part)));
+  const heatmap=parsed.heatmapGrid&&parsed.heatmapLsl!=null&&parsed.heatmapUsl!=null?{
+    grid:parsed.heatmapGrid,rows:parsed.heatmapRows,positions:parsed.heatmapPositions,
+    lsl:parsed.heatmapLsl,usl:parsed.heatmapUsl
+  }:null;
+  points.forEach(p=>div.appendChild(buildPage(p,part,heatmap)));
   div.style.display='block';
   document.getElementById('upload-wrap').style.display='none';
   document.getElementById('hdr-actions').style.display='flex';
