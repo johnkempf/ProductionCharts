@@ -39,7 +39,7 @@ body {
 .btn-hdr.print { background: #2e6fd4; border-color: #4a89e8; }
 .btn-hdr.print:hover { background: #3a7fe0; }
 
-#upload-wrap { padding: 28px 24px; }
+#upload-wrap { padding: 28px 24px; max-width: 1100px; margin: 0 auto; }
 .upload-zone {
   border: 2px dashed #c0bdb8; border-radius: 8px; background: #ffffff;
   padding: 52px 32px; text-align: center; cursor: pointer;
@@ -66,7 +66,12 @@ body {
   font-size: 13px; display: none;
 }
 
-#results { display: none; padding: 20px 24px; }
+#results {
+  display: none;
+  padding: 20px 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
 
 .info-strip {
   background: white; border: 1px solid #ccc; border-radius: 4px;
@@ -90,7 +95,13 @@ body {
 .minitab-title .sub  { font-size: 12px; color: #555; margin-top: 1px; }
 
 .minitab-body {
-  display: grid; grid-template-columns: 1fr 1fr;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  max-width: 100%;
+}
+.chart-wrap {
+  max-width: 500px;
+  width: 100%;
 }
 .q-tl { border-right: 1px solid #ddd; padding: 10px 14px; }
 .q-tr { padding: 10px 16px; }
@@ -100,6 +111,10 @@ body {
 .q-sublabel { font-size: 10px; color: #666; margin-bottom: 6px; font-style: italic; }
 
 canvas { display: block; }
+.chart-note {
+  font-size: 11px; color: #555; line-height: 1.45; margin-top: 10px; padding: 8px 0 0;
+  border-top: 1px solid #e0e0e0; max-width: 500px;
+}
 
 /* right-side stats */
 .stats-section { margin-bottom: 10px; }
@@ -254,13 +269,19 @@ function calcCapability(data,lsl,usl){
   if(!data||data.length<2) return null;
   const m=mean(data),s=stdDev(data);
   if(s<=0) return null;
-  const pp=(usl-lsl)/(6*s), ppu=(usl-m)/(3*s), ppl=(m-lsl)/(3*s), ppk=Math.min(ppu,ppl);
-  const out=data.filter(x=>x<lsl||x>usl).length;
-  const pB=normalCDF((lsl-m)/s), pA=1-normalCDF((usl-m)/s);
+  const hasLsl=lsl!==null, hasUsl=usl!==null;
+  const ppl=hasLsl?(m-lsl)/(3*s):null;
+  const pp=hasLsl&&hasUsl?(usl-lsl)/(6*s):null;
+  const ppu=hasUsl?(usl-m)/(3*s):null;
+  const ppk=hasLsl&&hasUsl?Math.min(ppu,ppl):null;
+  const outBelowLsl=hasLsl?data.filter(x=>x<lsl).length:0;
+  const pB=hasLsl?normalCDF((lsl-m)/s):0, pA=hasUsl?1-normalCDF((usl-m)/s):0;
   return {
-    pp, ppk, ppu, ppl, zBench:3*ppk,
-    pctObs:(out/data.length)*100, ppmObs:Math.round((out/data.length)*1e6),
-    pctExp:(pB+pA)*100, ppmExp:Math.round((pB+pA)*1e6),
+    pp, ppk, ppu, ppl,
+    ppkLsl: ppl,
+    zBench: ppl!==null?3*ppl:null,
+    pctObs:(outBelowLsl/data.length)*100, ppmObs:Math.round((outBelowLsl/data.length)*1e6),
+    pctExp:(pB*100), ppmExp:Math.round(pB*1e6),
     mean:m, std:s
   };
 }
@@ -305,7 +326,7 @@ function parseVertex(content){
     if(!map[gk].subFeatures.includes(crit)) map[gk].subFeatures.push(crit);
     if(!isNaN(nom)&&!isNaN(upD)&&!isNaN(loD)){
       if(map[gk].usl===null) map[gk].usl=r4(nom+upD);
-      if(map[gk].lsl===null) map[gk].lsl=r4(nom-loD);
+      if(map[gk].lsl===null) map[gk].lsl=r4(nom+loD);
       if(map[gk].target===null) map[gk].target=r4(nom);
     }
   }
@@ -496,10 +517,9 @@ function drawQQ(canvas,data){
 //  STATUS
 // ═══════════════════════════════════════════════
 function getStatus(ppk){
-  if(ppk===null||isNaN(ppk)) return {level:'warn',icon:'⚠️',head:'Assessment Unavailable',body:'No specification limits found for this critical. Verify inputs and spec limits before running.'};
-  if(ppk>=1.33) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:'Process capability is acceptable (Ppk ≥ 1.33). No machine adjustment required. Continue production.'};
-  if(ppk>=1.0)  return {level:'warn',icon:'⚠️',head:'PROCESS MARGINAL — MONITOR CLOSELY',body:'Process is marginal (1.00 ≤ Ppk < 1.33). Increase inspection frequency and notify a technician for a preventive review soon.'};
-  return {level:'fail',icon:'🔴',head:'PROCESS INCAPABLE — STOP AND CALL A TECHNICIAN',body:'Process is incapable (Ppk < 1.00). Parts produced may not meet downstream requirements. Stop production and call a technician to adjust the machine before continuing.'};
+  if(ppk===null||isNaN(ppk)) return {level:'warn',icon:'⚠️',head:'Assessment Unavailable',body:'No lower specification limit found for this critical. Verify inputs and spec limits before running.'};
+  if(ppk>=1.33) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:'One-sided capability vs LSL is acceptable (Ppk ≥ 1.33). No machine adjustment required. Continue production.'};
+  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:'One-sided Ppk vs LSL is below threshold (Ppk < 1.33). Parts may be below the lower spec. Stop production, back out the press, and call a technician to adjust before continuing.'};
 }
 
 // ═══════════════════════════════════════════════
@@ -508,10 +528,11 @@ function getStatus(ppk){
 function buildPage(point, partDisplay){
   const {data,lsl,usl,target,name}=point;
   const n=data.length, m=mean(data), s=stdDev(data);
-  const cap=(lsl!==null&&usl!==null)?calcCapability(data,lsl,usl):null;
+  const cap=lsl!==null?calcCapability(data,lsl,usl):null;
   const mot=meanOffTarget(data,target);
-  const status=getStatus(cap?cap.ppk:null);
-  const ppkF=fmtPpk(cap?cap.ppk:null);
+  const ppkLsl=cap?cap.ppkLsl:null;
+  const status=getStatus(ppkLsl);
+  const ppkF=fmtPpk(ppkLsl);
   const ppF =fmtPpk(cap?cap.pp:null);
 
   const page=document.createElement('div');
@@ -543,9 +564,15 @@ function buildPage(point, partDisplay){
   // ── TL: Histogram ──
   const qtl=document.createElement('div'); qtl.className='q-tl';
   qtl.innerHTML='<div class="q-label">Histogram</div><div class="q-sublabel">Are the data inside the limits and close to the target?</div>';
+  const chartWrap=document.createElement('div'); chartWrap.className='chart-wrap';
   const hc=document.createElement('canvas'); hc.width=500; hc.height=220;
-  hc.style.cssText='width:100%;height:auto;';
-  qtl.appendChild(hc);
+  hc.style.cssText='max-width:100%;height:auto;display:block;';
+  chartWrap.appendChild(hc);
+  const chartNote=document.createElement('p');
+  chartNote.className='chart-note';
+  chartNote.innerHTML='Capability is assessed using a <strong>one-sided Ppk vs. LSL only</strong>. Being near the lower spec is bad; exceeding the upper spec is acceptable while we hold our pins as close to the pcb as possible.';
+  chartWrap.appendChild(chartNote);
+  qtl.appendChild(chartWrap);
   body.appendChild(qtl);
 
   // ── TR: Stats panel ──
@@ -572,10 +599,10 @@ function buildPage(point, partDisplay){
       ${row('Mean off target', mot.off?'<span class="bad">Yes</span>':'No','',true)}
       ${row('P-value', mot.p,'',true)}
       ${row('Standard deviation', fN(s,7))}
-      <div class="stats-section-sub">Capability statistics</div>
+      <div class="stats-section-sub">Capability statistics (one-sided vs LSL)</div>
       ${row('Pp',       cap?ppF.txt:'—',  ppF.cls, true)}
-      ${row('Ppk',      cap?ppkF.txt:'—', ppkF.cls,true)}
-      ${row('Z.Bench',  cap?fN(cap.zBench,2):'—','',true)}
+      ${row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true)}
+      ${row('Z.Bench',  cap&&cap.zBench!=null?fN(cap.zBench,2):'—','',true)}
       ${row('% Out of spec (observed)', cap?fN(cap.pctObs,2):'—','',true)}
       ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
       ${row('PPM (DPMO) (observed)',  cap?cap.ppmObs:'—','',true)}
@@ -593,13 +620,9 @@ function buildPage(point, partDisplay){
 //  RENDER
 // ═══════════════════════════════════════════════
 function renderResults(parsed,filename){
-  const {points,unit,partDisplay,partPattern}=parsed;
+  const {points,partDisplay,partPattern}=parsed;
   const div=document.getElementById('results'); div.innerHTML='';
-  const capable  =points.filter(p=>{const c=calcCapability(p.data,p.lsl,p.usl);return c&&c.ppk>=1.33;});
-  const marginal =points.filter(p=>{const c=calcCapability(p.data,p.lsl,p.usl);return c&&c.ppk>=1.0&&c.ppk<1.33;});
-  const failing  =points.filter(p=>{const c=calcCapability(p.data,p.lsl,p.usl);return c&&c.ppk<1.0;});
-  const noSpec   =points.filter(p=>p.lsl===null||p.usl===null);
-  const part=partDisplay||partPattern||'—';
+  const part=partPattern||partDisplay||'—';
 
   const strip=document.createElement('div'); strip.className='info-strip';
   strip.innerHTML=`
@@ -607,16 +630,7 @@ function renderResults(parsed,filename){
     <div class="info-div"></div>
     <div class="info-item"><span class="info-label">File</span><span class="info-value" style="font-size:11px;color:#444">${filename}</span></div>
     <div class="info-div"></div>
-    <div class="info-item"><span class="info-label">Unit</span><span class="info-value">${unit||'mm'}</span></div>
-    <div class="info-div"></div>
-    <div class="info-item"><span class="info-label">Criticals</span><span class="info-value">${points.length}</span></div>
-    <div class="info-div"></div>
-    <div class="info-item"><span class="info-label">✅ Capable</span><span class="info-value" style="color:#167a3a">${capable.length}</span></div>
-    <div class="info-div"></div>
-    <div class="info-item"><span class="info-label">⚠️ Marginal</span><span class="info-value" style="color:#9a6500">${marginal.length}</span></div>
-    <div class="info-div"></div>
-    <div class="info-item"><span class="info-label">🔴 Failing</span><span class="info-value" style="color:#c02020">${failing.length}</span></div>
-    ${noSpec.length?`<div class="info-div"></div><div class="info-item"><span class="info-label">No Spec</span><span class="info-value">${noSpec.length}</span></div>`:''}
+    <div class="info-item info-note"><span class="info-label">Note</span><span class="info-value">Please staple this chart to the back of the shop.</span></div>
   `;
   div.appendChild(strip);
   points.forEach(p=>div.appendChild(buildPage(p,part)));
