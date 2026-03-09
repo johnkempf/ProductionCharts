@@ -828,25 +828,27 @@ function buildPage(point, partDisplay, heatmap){
     gridEl.className='connector-heatmap';
     gridEl.style.gridTemplateRows=`repeat(${heatmap.rows}, minmax(28px, 1fr))`;
     gridEl.style.gridTemplateColumns=`repeat(${heatmap.positions}, minmax(0, 1fr))`;
-    const pin1DataIndex=4;
-    const pin1Col=Math.min((pin1DataIndex-1)*5,heatmap.positions-1);
+    const pin1Row=Math.min(heatmap.rows-1,3);
+    const pin1Col=0;
     for(let r=0;r<heatmap.rows;r++)
       for(let c=0;c<heatmap.positions;c++){
         const cell=document.createElement('div');
-        cell.className='connector-heatmap-cell'+(r===0&&c===pin1Col?' pin-1':'');
+        cell.className='connector-heatmap-cell'+(r===pin1Row&&c===pin1Col?' pin-1':'');
         const v=heatmap.grid[r][c];
         const color=heatmapColor(v,heatmap.lsl,heatmap.usl);
         if(color){ cell.style.background=color; cell.title=v!=null?`Row ${r+1} pos ${c+1}: ${v}`:''; }
+        if(r===pin1Row&&c===pin1Col){
+          const pin1Overlay=document.createElement('div');
+          pin1Overlay.className='pin-1-overlay';
+          pin1Overlay.setAttribute('aria-label','Pin 1');
+          pin1Overlay.textContent='1';
+          cell.appendChild(pin1Overlay);
+        }
         gridEl.appendChild(cell);
       }
     container.appendChild(gridEl);
-    const pin1Overlay=document.createElement('div');
-    pin1Overlay.className='pin-1-overlay';
-    pin1Overlay.setAttribute('aria-label','Pin 1');
-    pin1Overlay.textContent='1';
-    container.appendChild(pin1Overlay);
     const pin1Label=document.createElement('div'); pin1Label.className='pin-1-label';
-    pin1Label.innerHTML='<strong>Pin 1</strong> = first position (top-left cell)';
+    pin1Label.innerHTML='<strong>Pin 1</strong> = 4th data point provided';
     container.appendChild(pin1Label);
     wrap.appendChild(container);
     const legend=document.createElement('div'); legend.className='connector-heatmap-legend';
