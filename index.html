@@ -501,6 +501,24 @@ function parseVertex(content){
   const heatmapGrid=Array.from({length:numRows},()=>Array(numPositions).fill(null));
   let heatmapLsl=null, heatmapUsl=null;
 
+  // Special sampling pattern for APF6 parts:
+  // measure 2 adjacent columns, then skip 10 columns, and always include the last 2 columns.
+  const isApf6=/^APF6-/i.test(partPattern||'');
+  let apf6SampleToPos=null;
+  if(isApf6){
+    const positions=[];
+    const step=12; // 2 measured, skip 10
+    for(let base=0;base<numPositions;base+=step){
+      if(base<numPositions) positions.push(base);
+      if(base+1<numPositions) positions.push(base+1);
+    }
+    const last1=Math.max(0,numPositions-2);
+    const last2=Math.max(0,numPositions-1);
+    if(!positions.includes(last1)) positions.push(last1);
+    if(!positions.includes(last2)) positions.push(last2);
+    apf6SampleToPos=positions;
+  }
+
   const map={};
   for(let i=dataStart;i<lines.length;i++){
     const parts=lines[i].split('\t').map(p=>p.replace(/"/g,'').trim());
@@ -522,7 +540,13 @@ function parseVertex(content){
     const rm=crit.match(/R(\d+)_(\d+)$/i);
     if(rm){
       const rowIdx=parseInt(rm[1],10)-1, sampleIdx=parseInt(rm[2],10);
-      const posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
+      let posIdx;
+      if(isApf6 && apf6SampleToPos && sampleIdx>=1 && sampleIdx<=apf6SampleToPos.length){
+        posIdx=apf6SampleToPos[sampleIdx-1];
+      }else{
+        // Default pattern: measure 1 column, then skip 5
+        posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
+      }
       if(rowIdx>=0&&rowIdx<numRows) heatmapGrid[rowIdx][posIdx]=meas;
     }
   }
