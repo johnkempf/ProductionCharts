@@ -489,6 +489,15 @@ function estimatedRange(data){
   return highAvg-lowAvg;
 }
 
+// Remove points outside mean ± 3*sigma (likely measurement error). Used only for Ppk/capability.
+function filterOutliers3Sigma(data){
+  if(!data||data.length<3) return data||[];
+  const m=mean(data), s=stdDev(data);
+  if(s<=0) return data;
+  const lo=m-3*s, hi=m+3*s;
+  return data.filter(x=>x>=lo&&x<=hi);
+}
+
 // ═══════════════════════════════════════════════
 //  PARSER
 // ═══════════════════════════════════════════════
@@ -566,7 +575,8 @@ function parseVertex(content){
           // Defer APF6 grid mapping until we know if it's one-fill or two-fill.
           apf6RawMeas.push({rowIdx,sampleIdx,meas});
           if(sampleIdx>apf6SampleIdxMax) apf6SampleIdxMax=sampleIdx;
-          // Odd/even sample index defines fill 1 vs fill 2 for APF6
+          // Two-fill: file order is (col0, col1), (col12, col13), (col24, col25)... so
+          // 1st measurement = fill1, 2nd = fill2, 3rd = fill1, etc. Odd/even = fill1/fill2.
           if(sampleIdx%2===1){
             map[gk].fill1Data.push(meas);
           }else{
@@ -893,7 +903,9 @@ function getStatus(ppk){
 function buildPage(point, partDisplay, heatmap){
   const {data,lsl,usl,target,name}=point;
   const n=data.length, m=mean(data), s=stdDev(data);
-  const cap=lsl!==null?calcCapability(data,lsl,usl):null;
+  // Capability uses 3-sigma–filtered data so outliers (likely measurement error) don't skew Ppk
+  const dataForCap=filterOutliers3Sigma(data);
+  const cap=lsl!==null?calcCapability(dataForCap,lsl,usl):null;
   const mot=meanOffTarget(data,target);
   const ppkLsl=cap?cap.ppkLsl:null;
   const isApf6Point=!!point.isApf6Point;
@@ -901,15 +913,15 @@ function buildPage(point, partDisplay, heatmap){
   const fill2Data=isApf6Point?(point.fill2Data||[]):[];
   const hasFill1=isApf6Point && fill1Data.length>=2;
   const hasFill2=isApf6Point && fill2Data.length>=2;
-  // Capability per fill for APF6 (bimodal behavior)
+  // Capability per fill for APF6 (bimodal behavior); each fill filtered for outliers
   let capFill1=null, capFill2=null, ppkFill1=null, ppkFill2=null;
   if(isApf6Point && lsl!==null){
     if(fill1Data.length>=2){
-      capFill1=calcCapability(fill1Data,lsl,usl);
+      capFill1=calcCapability(filterOutliers3Sigma(fill1Data),lsl,usl);
       ppkFill1=capFill1?capFill1.ppkLsl:null;
     }
     if(fill2Data.length>=2){
-      capFill2=calcCapability(fill2Data,lsl,usl);
+      capFill2=calcCapability(filterOutliers3Sigma(fill2Data),lsl,usl);
       ppkFill2=capFill2?capFill2.ppkLsl:null;
     }
   }
