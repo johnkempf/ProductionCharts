@@ -521,22 +521,11 @@ function parseVertex(content){
   // Track where the *first* valid heatmap data lands (for male parts)
   let firstSampleRowIdx=null, firstSampleColIdx=null;
 
-  // Special sampling pattern for APF6 parts:
-  // measure 2 adjacent columns, then skip 10 columns, and always include the last 2 columns.
-  let apf6SampleToPos=null;
-  if(isApf6){
-    const positions=[];
-    const step=12; // 2 measured, skip 10
-    for(let base=0;base<numPositions;base+=step){
-      if(base<numPositions) positions.push(base);
-      if(base+1<numPositions) positions.push(base+1);
-    }
-    const last1=Math.max(0,numPositions-2);
-    const last2=Math.max(0,numPositions-1);
-    if(!positions.includes(last1)) positions.push(last1);
-    if(!positions.includes(last2)) positions.push(last2);
-    apf6SampleToPos=positions;
-  }
+  // For APF6 we delay mapping into the heatmap grid so we can
+  // distinguish between one-fill (1 column, skip 10) and two-fill
+  // (2 columns, skip 10) programs based on how many points we see.
+  const apf6RawMeas=[]; // {rowIdx,sampleIdx,meas}
+  let apf6SampleIdxMax=0;
 
   const map={};
   for(let i=dataStart;i<lines.length;i++){
@@ -572,30 +561,90 @@ function parseVertex(content){
     const rm=crit.match(/R(\d+)_(\d+)$/i);
     if(rm){
       const rowIdx=parseInt(rm[1],10)-1, sampleIdx=parseInt(rm[2],10);
-      let posIdx;
-      if(isApf6 && apf6SampleToPos && sampleIdx>=1 && sampleIdx<=apf6SampleToPos.length){
-        posIdx=apf6SampleToPos[sampleIdx-1];
-      }else{
-        // Default pattern: measure 1 column, then skip 5
-        posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
-      }
-      if(rowIdx>=0&&rowIdx<numRows&&posIdx>=0&&posIdx<numPositions){
-        heatmapGrid[rowIdx][posIdx]=meas;
-        if(firstSampleRowIdx===null){
-          firstSampleRowIdx=rowIdx;
-          firstSampleColIdx=posIdx;
-        }
-      }
-      // For APF6, split data into two fills by column index (odd/even position in sampling pattern)
-      if(isApf6){
-        if(sampleIdx%2===1){
-          map[gk].fill1Data.push(meas);
+      if(rowIdx>=0&&rowIdx<numRows){
+        if(isApf6){
+          // Defer APF6 grid mapping until we know if it's one-fill or two-fill.
+          apf6RawMeas.push({rowIdx,sampleIdx,meas});
+          if(sampleIdx>apf6SampleIdxMax) apf6SampleIdxMax=sampleIdx;
+          // Odd/even sample index defines fill 1 vs fill 2 for APF6
+          if(sampleIdx%2===1){
+            map[gk].fill1Data.push(meas);
+          }else{
+            map[gk].fill2Data.push(meas);
+          }
         }else{
-          map[gk].fill2Data.push(meas);
+          // Default pattern for non-APF6: measure 1 column, then skip 5
+          const posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
+          if(posIdx>=0&&posIdx<numPositions){
+            heatmapGrid[rowIdx][posIdx]=meas;
+            if(firstSampleRowIdx===null){
+              firstSampleRowIdx=rowIdx;
+              firstSampleColIdx=posIdx;
+            }
+          }
         }
       }
     }
   }
+  // After reading all data, map APF6 measurements into the heatmap grid
+  if(isApf6 && apf6RawMeas.length){
+    // Full two-fill program: 2 columns, skip 10
+    const dualPositions=[];
+    const dualStep=12; // 2 measured, skip 10
+    for(let base=0;base<numPositions;base+=dualStep){
+      if(base<numPositions) dualPositions.push(base);
+      if(base+1<numPositions) dualPositions.push(base+1);
+    }
+    const last1=Math.max(0,numPositions-2);
+    const last2=Math.max(0,numPositions-1);
+    if(!dualPositions.includes(last1)) dualPositions.push(last1);
+    if(!dualPositions.includes(last2)) dualPositions.push(last2);
+    const expectedDual=dualPositions.length*numRows;
+
+    // If we have substantially fewer points than expected, treat as one-fill:
+    // one column, then skip 9 (so only one fill's columns are sampled).
+    const isSingleFill=apf6RawMeas.length<expectedDual*0.75;
+
+    let apf6SampleToPos;
+    if(isSingleFill){
+      const singlePositions=[];
+      const singleStep=10; // 1 measured, skip 9
+      for(let base=0; singlePositions.length<apf6SampleIdxMax && base<numPositions; base+=singleStep){
+        singlePositions.push(base);
+      }
+      // Always include the last column, so we sample the far end
+      const lastCol=numPositions-1;
+      if(!singlePositions.includes(lastCol)) singlePositions.push(lastCol);
+      apf6SampleToPos=singlePositions;
+    }else{
+      apf6SampleToPos=dualPositions;
+    }
+
+    apf6RawMeas.forEach(({rowIdx,sampleIdx,meas})=>{
+      let posIdx;
+      if(sampleIdx>=1 && sampleIdx<=apf6SampleToPos.length){
+        posIdx=apf6SampleToPos[sampleIdx-1];
+      }else{
+        // Fallback: clamp to last position
+        posIdx=numPositions-1;
+      }
+      if(posIdx>=0&&posIdx<numPositions){
+        heatmapGrid[rowIdx][posIdx]=meas;
+      }
+    });
+
+    // Single-fill run: all data is one fill. Put everything in fill1, clear fill2
+    // so we only show Ppk Fill 1 and use it for status.
+    if(isSingleFill){
+      Object.values(map).forEach(p=>{
+        if(p.isApf6Point && p.data.length){
+          p.fill1Data=p.data.slice();
+          p.fill2Data=[];
+        }
+      });
+    }
+  }
+
   const points=Object.values(map).filter(p=>p.data.length>0);
   // Decide Pin 1 location based on connector family
   let pin1RowIdx=null, pin1ColIdx=null, pin1Desc='';
@@ -850,6 +899,8 @@ function buildPage(point, partDisplay, heatmap){
   const isApf6Point=!!point.isApf6Point;
   const fill1Data=isApf6Point?(point.fill1Data||[]):[];
   const fill2Data=isApf6Point?(point.fill2Data||[]):[];
+  const hasFill1=isApf6Point && fill1Data.length>=2;
+  const hasFill2=isApf6Point && fill2Data.length>=2;
   // Capability per fill for APF6 (bimodal behavior)
   let capFill1=null, capFill2=null, ppkFill1=null, ppkFill2=null;
   if(isApf6Point && lsl!==null){
@@ -862,12 +913,15 @@ function buildPage(point, partDisplay, heatmap){
       ppkFill2=capFill2?capFill2.ppkLsl:null;
     }
   }
-  // For APF6: use only the two fills; status = lowest of the two. Otherwise use overall Ppk.
-  const ppkWorst=isApf6Point
-    ? (([ppkFill1,ppkFill2].filter(v=>v!=null&&!isNaN(v)).length
-        ? Math.min(...[ppkFill1,ppkFill2].filter(v=>v!=null&&!isNaN(v)))
-        : null))
-    : ppkLsl;
+  // For APF6: use only the two fills; status = lowest of the two.
+  // If only one fill has data, use that one. For non-APF6, use overall Ppk.
+  let ppkWorst;
+  if(isApf6Point){
+    const candidates=[ppkFill1,ppkFill2].filter(v=>v!=null&&!isNaN(v));
+    ppkWorst=candidates.length?Math.min(...candidates):null;
+  }else{
+    ppkWorst=ppkLsl;
+  }
   const status=getStatus(ppkWorst);
   const ppkF=fmtPpk(ppkLsl);
   const ppkFFill1=fmtPpk(ppkFill1);
@@ -940,8 +994,8 @@ function buildPage(point, partDisplay, heatmap){
       ${row('Standard deviation', fN(s,7))}
       ${row('Estimated range', estRange!=null?fN(estRange,7):'—','',true)}
       <div class="stats-section-sub">Capability statistics (one-sided vs LSL)</div>
-      ${isApf6Point?row('Ppk Fill 1 (vs LSL)', ppkFill1!=null?ppkFFill1.txt:'—', ppkFFill1.cls,true):row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true)}
-      ${isApf6Point?row('Ppk Fill 2 (vs LSL)', ppkFill2!=null?ppkFFill2.txt:'—', ppkFFill2.cls,true):''}
+      ${isApf6Point?row('Ppk Fill 1 (vs LSL)', hasFill1?ppkFFill1.txt:'—', hasFill1?ppkFFill1.cls:'',true):row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true)}
+      ${isApf6Point&&hasFill2?row('Ppk Fill 2 (vs LSL)', ppkFill2!=null?ppkFFill2.txt:'—', ppkFFill2.cls,true):''}
       ${row('Z.Bench',  cap&&cap.zBench!=null?fN(cap.zBench,2):'—','',true)}
       ${row('% Out of spec (observed)', cap?fN(cap.pctObs,2):'—','',true)}
       ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
