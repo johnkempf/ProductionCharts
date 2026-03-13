@@ -1062,7 +1062,7 @@ function buildPage(point, partDisplay, heatmap){
     page.appendChild(wrap);
   }
 
-  setTimeout(()=>{ drawHistogram(hc,point); },0);
+  setTimeout(()=>{ drawHistogram(hc, { ...point, data: dataForCap }); },0);
   return page;
 }
 
