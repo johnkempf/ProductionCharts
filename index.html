@@ -478,6 +478,17 @@ function meanOffTarget(data,target){
   return {off:p<0.05, p:p<0.001?'<0.001':p.toFixed(3)};
 }
 
+// Robust estimate of range using the average of the k lowest
+// and k highest points (k up to 3) to reduce sensitivity to outliers.
+function estimatedRange(data){
+  if(!data||data.length<2) return null;
+  const sorted=[...data].sort((a,b)=>a-b);
+  const k=Math.min(3,sorted.length);
+  const lowAvg=mean(sorted.slice(0,k));
+  const highAvg=mean(sorted.slice(-k));
+  return highAvg-lowAvg;
+}
+
 // ═══════════════════════════════════════════════
 //  PARSER
 // ═══════════════════════════════════════════════
@@ -501,9 +512,17 @@ function parseVertex(content){
   const heatmapGrid=Array.from({length:numRows},()=>Array(numPositions).fill(null));
   let heatmapLsl=null, heatmapUsl=null;
 
+  // Determine connector family (for sampling + Pin 1 rules)
+  const pattern=(partPattern||'').toUpperCase();
+  const isApf6=/^APF6-/.test(pattern);
+  const isFemale=/^ADF6-/.test(pattern)||/^APF6-/.test(pattern);
+  const isMale=/^ADM6-/.test(pattern)||/^APM6-/.test(pattern);
+
+  // Track where the *first* valid heatmap data lands (for male parts)
+  let firstSampleRowIdx=null, firstSampleColIdx=null;
+
   // Special sampling pattern for APF6 parts:
   // measure 2 adjacent columns, then skip 10 columns, and always include the last 2 columns.
-  const isApf6=/^APF6-/i.test(partPattern||'');
   let apf6SampleToPos=null;
   if(isApf6){
     const positions=[];
@@ -528,7 +547,20 @@ function parseVertex(content){
     const meas=parseFloat(parts[1]),nom=parseFloat(parts[2]),upD=parseFloat(parts[3]),loD=parseFloat(parts[4]);
     if(isNaN(meas)) continue;
     const gk=crit.match(/^([A-Z]+\d+)/)?.[1]||crit;
-    if(!map[gk]) map[gk]={name:gk,data:[],lsl:null,usl:null,target:null,subFeatures:[]};
+    if(!map[gk]){
+      map[gk]={
+        name:gk,
+        data:[],
+        lsl:null,
+        usl:null,
+        target:null,
+        subFeatures:[],
+        // For APF6 bimodal behavior
+        isApf6Point:isApf6,
+        fill1Data:[],
+        fill2Data:[]
+      };
+    }
     map[gk].data.push(meas);
     if(!map[gk].subFeatures.includes(crit)) map[gk].subFeatures.push(crit);
     if(!isNaN(nom)&&!isNaN(upD)&&!isNaN(loD)){
@@ -547,11 +579,64 @@ function parseVertex(content){
         // Default pattern: measure 1 column, then skip 5
         posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
       }
-      if(rowIdx>=0&&rowIdx<numRows) heatmapGrid[rowIdx][posIdx]=meas;
+      if(rowIdx>=0&&rowIdx<numRows&&posIdx>=0&&posIdx<numPositions){
+        heatmapGrid[rowIdx][posIdx]=meas;
+        if(firstSampleRowIdx===null){
+          firstSampleRowIdx=rowIdx;
+          firstSampleColIdx=posIdx;
+        }
+      }
+      // For APF6, split data into two fills by column index (odd/even position in sampling pattern)
+      if(isApf6){
+        if(sampleIdx%2===1){
+          map[gk].fill1Data.push(meas);
+        }else{
+          map[gk].fill2Data.push(meas);
+        }
+      }
     }
   }
   const points=Object.values(map).filter(p=>p.data.length>0);
-  return {points,unit,partDisplay,partPattern,heatmapGrid,heatmapRows:numRows,heatmapPositions:numPositions,heatmapLsl,heatmapUsl};
+  // Decide Pin 1 location based on connector family
+  let pin1RowIdx=null, pin1ColIdx=null, pin1Desc='';
+  if(isMale && firstSampleRowIdx!==null && firstSampleColIdx!==null){
+    // For ADM6 / APM6 (male): Pin 1 is the first data point provided in the file
+    pin1RowIdx=firstSampleRowIdx;
+    pin1ColIdx=firstSampleColIdx;
+    pin1Desc='Pin 1 = first data point provided in file';
+  }else if(isFemale){
+    // For ADF6 / APF6 (female): Pin 1 is the last measured pin in the first column
+    for(let r=numRows-1;r>=0;r--){
+      if(heatmapGrid[r][0]!=null){
+        pin1RowIdx=r;
+        pin1ColIdx=0;
+        break;
+      }
+    }
+    if(pin1RowIdx!==null){
+      pin1Desc='Pin 1 = last measured pin in first column';
+    }
+  }
+  // Fallback if nothing matched or no data found for those rules
+  if(pin1RowIdx===null || pin1ColIdx===null){
+    pin1RowIdx=Math.min(numRows-1,3);
+    pin1ColIdx=0;
+    pin1Desc='Pin 1 = default reference location';
+  }
+  return {
+    points,
+    unit,
+    partDisplay,
+    partPattern,
+    heatmapGrid,
+    heatmapRows:numRows,
+    heatmapPositions:numPositions,
+    heatmapLsl,
+    heatmapUsl,
+    heatmapPin1Row:pin1RowIdx,
+    heatmapPin1Col:pin1ColIdx,
+    heatmapPin1Desc:pin1Desc
+  };
 }
 
 function r4(v){ return Math.round(v*10000)/10000; }
@@ -762,9 +847,32 @@ function buildPage(point, partDisplay, heatmap){
   const cap=lsl!==null?calcCapability(data,lsl,usl):null;
   const mot=meanOffTarget(data,target);
   const ppkLsl=cap?cap.ppkLsl:null;
-  const status=getStatus(ppkLsl);
+  const isApf6Point=!!point.isApf6Point;
+  const fill1Data=isApf6Point?(point.fill1Data||[]):[];
+  const fill2Data=isApf6Point?(point.fill2Data||[]):[];
+  // Capability per fill for APF6 (bimodal behavior)
+  let capFill1=null, capFill2=null, ppkFill1=null, ppkFill2=null;
+  if(isApf6Point && lsl!==null){
+    if(fill1Data.length>=2){
+      capFill1=calcCapability(fill1Data,lsl,usl);
+      ppkFill1=capFill1?capFill1.ppkLsl:null;
+    }
+    if(fill2Data.length>=2){
+      capFill2=calcCapability(fill2Data,lsl,usl);
+      ppkFill2=capFill2?capFill2.ppkLsl:null;
+    }
+  }
+  // For APF6: use only the two fills; status = lowest of the two. Otherwise use overall Ppk.
+  const ppkWorst=isApf6Point
+    ? (([ppkFill1,ppkFill2].filter(v=>v!=null&&!isNaN(v)).length
+        ? Math.min(...[ppkFill1,ppkFill2].filter(v=>v!=null&&!isNaN(v)))
+        : null))
+    : ppkLsl;
+  const status=getStatus(ppkWorst);
   const ppkF=fmtPpk(ppkLsl);
-  const ppF =fmtPpk(cap?cap.pp:null);
+  const ppkFFill1=fmtPpk(ppkFill1);
+  const ppkFFill2=fmtPpk(ppkFill2);
+  const estRange=estimatedRange(data);
 
   const page=document.createElement('div');
   page.className='minitab-page';
@@ -830,9 +938,10 @@ function buildPage(point, partDisplay, heatmap){
       ${row('Mean off target', mot.off?'<span class="bad">Yes</span>':'No','',true)}
       ${row('P-value', mot.p,'',true)}
       ${row('Standard deviation', fN(s,7))}
+      ${row('Estimated range', estRange!=null?fN(estRange,7):'—','',true)}
       <div class="stats-section-sub">Capability statistics (one-sided vs LSL)</div>
-      ${row('Pp',       cap?ppF.txt:'—',  ppF.cls, true)}
-      ${row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true)}
+      ${isApf6Point?row('Ppk Fill 1 (vs LSL)', ppkFill1!=null?ppkFFill1.txt:'—', ppkFFill1.cls,true):row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true)}
+      ${isApf6Point?row('Ppk Fill 2 (vs LSL)', ppkFill2!=null?ppkFFill2.txt:'—', ppkFFill2.cls,true):''}
       ${row('Z.Bench',  cap&&cap.zBench!=null?fN(cap.zBench,2):'—','',true)}
       ${row('% Out of spec (observed)', cap?fN(cap.pctObs,2):'—','',true)}
       ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
@@ -852,8 +961,8 @@ function buildPage(point, partDisplay, heatmap){
     gridEl.className='connector-heatmap';
     gridEl.style.gridTemplateRows=`repeat(${heatmap.rows}, minmax(28px, 1fr))`;
     gridEl.style.gridTemplateColumns=`repeat(${heatmap.positions}, minmax(0, 1fr))`;
-    const pin1Row=Math.min(heatmap.rows-1,3);
-    const pin1Col=0;
+    const pin1Row=(typeof heatmap.pin1Row==='number')?heatmap.pin1Row:Math.min(heatmap.rows-1,3);
+    const pin1Col=(typeof heatmap.pin1Col==='number')?heatmap.pin1Col:0;
     for(let r=0;r<heatmap.rows;r++)
       for(let c=0;c<heatmap.positions;c++){
         const cell=document.createElement('div');
@@ -871,9 +980,6 @@ function buildPage(point, partDisplay, heatmap){
         gridEl.appendChild(cell);
       }
     container.appendChild(gridEl);
-    const pin1Label=document.createElement('div'); pin1Label.className='pin-1-label';
-    pin1Label.innerHTML='<strong>Pin 1</strong> = 4th data point provided';
-    container.appendChild(pin1Label);
     wrap.appendChild(container);
     const legend=document.createElement('div'); legend.className='connector-heatmap-legend';
     legend.innerHTML=`
@@ -912,8 +1018,14 @@ function renderResults(parsed,filename){
   `;
   div.appendChild(strip);
   const heatmap=parsed.heatmapGrid&&parsed.heatmapLsl!=null&&parsed.heatmapUsl!=null?{
-    grid:parsed.heatmapGrid,rows:parsed.heatmapRows,positions:parsed.heatmapPositions,
-    lsl:parsed.heatmapLsl,usl:parsed.heatmapUsl
+    grid:parsed.heatmapGrid,
+    rows:parsed.heatmapRows,
+    positions:parsed.heatmapPositions,
+    lsl:parsed.heatmapLsl,
+    usl:parsed.heatmapUsl,
+    pin1Row:parsed.heatmapPin1Row,
+    pin1Col:parsed.heatmapPin1Col,
+    pin1Desc:parsed.heatmapPin1Desc
   }:null;
   points.forEach(p=>div.appendChild(buildPage(p,part,heatmap)));
   div.style.display='block';
