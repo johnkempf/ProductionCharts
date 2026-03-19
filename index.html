@@ -490,13 +490,13 @@ function estimatedRange(data){
   return highAvg-lowAvg;
 }
 
-// Remove points outside mean ± 3*sigma (likely measurement error). Used only for Ppk/capability.
+// Remove points below mean - 2.2*sigma (LSL-side only). Used for capability/chart.
 function filterOutliers3Sigma(data){
   if(!data||data.length<3) return data||[];
   const m=mean(data), s=stdDev(data);
   if(s<=0) return data;
-  const lo=m-3*s, hi=m+3*s;
-  return data.filter(x=>x>=lo&&x<=hi);
+  const lo=m-2.2*s;
+  return data.filter(x=>x>=lo);
 }
 
 // ═══════════════════════════════════════════════
@@ -924,25 +924,30 @@ function getStatus(ppk){
 function buildPage(point, partDisplay, heatmap){
   const {data,lsl,usl,target,name}=point;
   const n=data.length, m=mean(data), s=stdDev(data);
-  // Capability uses 3-sigma–filtered data so outliers (likely measurement error) don't skew Ppk
+  // Capability uses lower-side 2.2-sigma filtering so low outliers don't skew Ppk
   const dataForCap=filterOutliers3Sigma(data);
+  const filteredOutCount=Math.max(0,data.length-dataForCap.length);
   const cap=lsl!==null?calcCapability(dataForCap,lsl,usl):null;
   const mot=meanOffTarget(data,target);
   const ppkLsl=cap?cap.ppkLsl:null;
   const isApf6Point=!!point.isApf6Point;
   const fill1Data=isApf6Point?(point.fill1Data||[]):[];
   const fill2Data=isApf6Point?(point.fill2Data||[]):[];
+  const fill1ForCap=isApf6Point?filterOutliers3Sigma(fill1Data):[];
+  const fill2ForCap=isApf6Point?filterOutliers3Sigma(fill2Data):[];
+  const fill1FilteredOut=Math.max(0,fill1Data.length-fill1ForCap.length);
+  const fill2FilteredOut=Math.max(0,fill2Data.length-fill2ForCap.length);
   const hasFill1=isApf6Point && fill1Data.length>=2;
   const hasFill2=isApf6Point && fill2Data.length>=2;
   // Capability per fill for APF6 (bimodal behavior); each fill filtered for outliers
   let capFill1=null, capFill2=null, ppkFill1=null, ppkFill2=null;
   if(isApf6Point && lsl!==null){
     if(fill1Data.length>=2){
-      capFill1=calcCapability(filterOutliers3Sigma(fill1Data),lsl,usl);
+      capFill1=calcCapability(fill1ForCap,lsl,usl);
       ppkFill1=capFill1?capFill1.ppkLsl:null;
     }
     if(fill2Data.length>=2){
-      capFill2=calcCapability(filterOutliers3Sigma(fill2Data),lsl,usl);
+      capFill2=calcCapability(fill2ForCap,lsl,usl);
       ppkFill2=capFill2?capFill2.ppkLsl:null;
     }
   }
@@ -1034,6 +1039,9 @@ function buildPage(point, partDisplay, heatmap){
       ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
       ${row('PPM (DPMO) (observed)',  cap?cap.ppmObs:'—','',true)}
       ${row('PPM (DPMO) (expected)',  cap?cap.ppmExp:'—','',true)}
+      ${row('Filtered by 2.2σ (low side only)', `${filteredOutCount} of ${n}`,'',true)}
+      ${isApf6Point&&hasFill1?row('Fill 1 filtered by 2.2σ (low side)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
+      ${isApf6Point&&hasFill2?row('Fill 2 filtered by 2.2σ (low side)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
     </div>
   `;
   body.appendChild(qtr);
