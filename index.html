@@ -951,12 +951,13 @@ function buildPage(point, partDisplay, heatmap){
       ppkFill2=capFill2?capFill2.ppkLsl:null;
     }
   }
-  // For APF6: use only the two fills; status = lowest of the two.
-  // If only one fill has data, use that one. For non-APF6, use overall Ppk.
+  // For APF6: prefer fill-based status (lowest of the two fills). If fill mapping
+  // is unavailable (e.g., alternate critical naming format), fall back to overall
+  // one-sided Ppk from raw points so capability still renders.
   let ppkWorst;
   if(isApf6Point){
     const candidates=[ppkFill1,ppkFill2].filter(v=>v!=null&&!isNaN(v));
-    ppkWorst=candidates.length?Math.min(...candidates):null;
+    ppkWorst=candidates.length?Math.min(...candidates):ppkLsl;
   }else{
     ppkWorst=ppkLsl;
   }
