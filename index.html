@@ -912,10 +912,10 @@ function drawQQ(canvas,data){
 // ═══════════════════════════════════════════════
 //  STATUS
 // ═══════════════════════════════════════════════
-function getStatus(ppk){
+function getStatus(ppk, minPpk=1.0){
   if(ppk===null||isNaN(ppk)) return {level:'warn',icon:'⚠️',head:'Assessment Unavailable',body:'No lower specification limit found for this critical. Verify inputs and spec limits before running.'};
-  if(ppk>=1.0) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:'(Ppk ≥ 1.0). Pin press is acceptable. No machine adjustment required. Continue running.'};
-  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:'(Ppk < 1.0). Pins are pressed too far into the body. Stop production. Call a tech to adjust the press before continuing.'};
+  if(ppk>=minPpk) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:`(Ppk ≥ ${minPpk.toFixed(2)}). Pin press is acceptable. No machine adjustment required. Continue running.`};
+  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:`(Ppk < ${minPpk.toFixed(2)}). Pins are pressed too far into the body. Stop production. Call a tech to adjust the press before continuing.`};
 }
 
 // ═══════════════════════════════════════════════
@@ -923,6 +923,8 @@ function getStatus(ppk){
 // ═══════════════════════════════════════════════
 function buildPage(point, partDisplay, heatmap){
   const {data,lsl,usl,target,name}=point;
+  const isApf6Part=/^APF6-/.test((partDisplay||'').toUpperCase());
+  const minPpk=isApf6Part?0.85:1.0;
   const n=data.length, m=mean(data), s=stdDev(data);
   // Capability uses lower-side 2.2-sigma filtering so low outliers don't skew Ppk
   const dataForCap=filterOutliers3Sigma(data);
@@ -962,7 +964,7 @@ function buildPage(point, partDisplay, heatmap){
   }else{
     ppkWorst=ppkLsl;
   }
-  const status=getStatus(ppkWorst);
+  const status=getStatus(ppkWorst,minPpk);
   const ppkF=fmtPpk(ppkLsl);
   const ppkFFill1=fmtPpk(ppkFill1);
   const ppkFFill2=fmtPpk(ppkFill2);
