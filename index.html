@@ -531,15 +531,10 @@ function parseVertex(content){
   // Track where the *first* valid heatmap data lands (for male parts)
   let firstSampleRowIdx=null, firstSampleColIdx=null;
 
-  // For APF6 we delay mapping into the heatmap grid so we can
-  // distinguish between one-fill (1 column, skip 10) and two-fill
-  // (2 columns, skip 10) programs based on how many points we see.
-  const apf6RawMeas=[]; // {rowIdx,sampleIdx,meas}
   // For full-inspection runs (100% of pins measured), we also keep a
   // generic list of all measurements so we can map every point directly
   // to a row/column without any skipping pattern.
   const allRawMeas=[]; // {rowIdx,sampleIdx,meas}
-  let apf6SampleIdxMax=0;
 
   const map={};
   for(let i=dataStart;i<lines.length;i++){
@@ -572,24 +567,31 @@ function parseVertex(content){
       if(map[gk].target===null) map[gk].target=r4(nom);
       if(heatmapLsl===null){ heatmapLsl=r4(nom+loD); heatmapUsl=r4(nom+upD); }
     }
+    const apf6Cell=isApf6?crit.match(/^[A-Z]+\d+_([A-Z])(\d+)$/i):null;
+    if(apf6Cell){
+      const rowLetter=apf6Cell[1].toUpperCase();
+      const rowIdx=rowLetter.charCodeAt(0)-65; // A=0, B=1, ...
+      const colNum=parseInt(apf6Cell[2],10);
+      const colIdx=colNum-1;
+      if(rowIdx>=0&&rowIdx<numRows&&colIdx>=0&&colIdx<numPositions){
+        heatmapGrid[rowIdx][colIdx]=meas;
+        allRawMeas.push({rowIdx,sampleIdx:colNum,meas});
+        if(colNum%2===1){
+          map[gk].fill1Data.push(meas);
+        }else{
+          map[gk].fill2Data.push(meas);
+        }
+      }
+      continue;
+    }
+
     const rm=crit.match(/R(\d+)_(\d+)$/i);
     if(rm){
       const rowIdx=parseInt(rm[1],10)-1, sampleIdx=parseInt(rm[2],10);
       if(rowIdx>=0&&rowIdx<numRows){
         // Always keep a raw copy so we can handle full-inspection (N = rows*cols)
         allRawMeas.push({rowIdx,sampleIdx,meas});
-        if(isApf6){
-          // Defer APF6 grid mapping until we know if it's one-fill or two-fill.
-          apf6RawMeas.push({rowIdx,sampleIdx,meas});
-          if(sampleIdx>apf6SampleIdxMax) apf6SampleIdxMax=sampleIdx;
-          // Two-fill: file order is (col0, col1), (col12, col13), (col24, col25)... so
-          // 1st measurement = fill1, 2nd = fill2, 3rd = fill1, etc. Odd/even = fill1/fill2.
-          if(sampleIdx%2===1){
-            map[gk].fill1Data.push(meas);
-          }else{
-            map[gk].fill2Data.push(meas);
-          }
-        }else{
+        if(!isApf6){
           // Default pattern for non-APF6: measure 1 column, then skip 5
           const posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
           if(posIdx>=0&&posIdx<numPositions){
@@ -601,64 +603,6 @@ function parseVertex(content){
           }
         }
       }
-    }
-  }
-  // After reading all data, map APF6 measurements into the heatmap grid
-  if(isApf6 && apf6RawMeas.length){
-    // Full two-fill program: 2 columns, skip 10
-    const dualPositions=[];
-    const dualStep=12; // 2 measured, skip 10
-    for(let base=0;base<numPositions;base+=dualStep){
-      if(base<numPositions) dualPositions.push(base);
-      if(base+1<numPositions) dualPositions.push(base+1);
-    }
-    const last1=Math.max(0,numPositions-2);
-    const last2=Math.max(0,numPositions-1);
-    if(!dualPositions.includes(last1)) dualPositions.push(last1);
-    if(!dualPositions.includes(last2)) dualPositions.push(last2);
-    const expectedDual=dualPositions.length*numRows;
-
-    // If we have substantially fewer points than expected, treat as one-fill:
-    // one column, then skip 9 (so only one fill's columns are sampled).
-    const isSingleFill=apf6RawMeas.length<expectedDual*0.75;
-
-    let apf6SampleToPos;
-    if(isSingleFill){
-      const singlePositions=[];
-      const singleStep=10; // 1 measured, skip 9
-      for(let base=0; singlePositions.length<apf6SampleIdxMax && base<numPositions; base+=singleStep){
-        singlePositions.push(base);
-      }
-      // Always include the last column, so we sample the far end
-      const lastCol=numPositions-1;
-      if(!singlePositions.includes(lastCol)) singlePositions.push(lastCol);
-      apf6SampleToPos=singlePositions;
-    }else{
-      apf6SampleToPos=dualPositions;
-    }
-
-    apf6RawMeas.forEach(({rowIdx,sampleIdx,meas})=>{
-      let posIdx;
-      if(sampleIdx>=1 && sampleIdx<=apf6SampleToPos.length){
-        posIdx=apf6SampleToPos[sampleIdx-1];
-      }else{
-        // Fallback: clamp to last position
-        posIdx=numPositions-1;
-      }
-      if(posIdx>=0&&posIdx<numPositions){
-        heatmapGrid[rowIdx][posIdx]=meas;
-      }
-    });
-
-    // Single-fill run: all data is one fill. Put everything in fill1, clear fill2
-    // so we only show Ppk Fill 1 and use it for status.
-    if(isSingleFill){
-      Object.values(map).forEach(p=>{
-        if(p.isApf6Point && p.data.length){
-          p.fill1Data=p.data.slice();
-          p.fill2Data=[];
-        }
-      });
     }
   }
   // If this is a full-inspection run (100% of pins measured), override any
@@ -1036,16 +980,15 @@ function buildPage(point, partDisplay, heatmap){
       ${row('Standard deviation', fN(s,7))}
       ${row('Estimated range', estRange!=null?fN(estRange,7):'—','',true)}
       <div class="stats-section-sub">Capability statistics (one-sided vs LSL)</div>
-      ${useApf6FillStats
-        ? row('Ppk Fill 1 (vs LSL)', hasFill1?ppkFFill1.txt:'—', hasFill1?ppkFFill1.cls:'',true)
-        : row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true)}
+      ${useApf6FillStats&&hasFill1?row('Ppk Fill 1 (vs LSL)', ppkFill1!=null?ppkFFill1.txt:'—', ppkFFill1.cls,true):''}
       ${useApf6FillStats&&hasFill2?row('Ppk Fill 2 (vs LSL)', ppkFill2!=null?ppkFFill2.txt:'—', ppkFFill2.cls,true):''}
+      ${!useApf6FillStats?row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true):''}
       ${row('Z.Bench',  cap&&cap.zBench!=null?fN(cap.zBench,2):'—','',true)}
       ${row('% Out of spec (observed)', cap?fN(cap.pctObs,2):'—','',true)}
       ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
       ${row('PPM (DPMO) (observed)',  cap?cap.ppmObs:'—','',true)}
       ${row('PPM (DPMO) (expected)',  cap?cap.ppmExp:'—','',true)}
-      ${row('Filtered by 2.2σ (low side only)', `${filteredOutCount} of ${n}`,'',true)}
+      ${!useApf6FillStats?row('Filtered by 2.2σ (low side only)', `${filteredOutCount} of ${n}`,'',true):''}
       ${useApf6FillStats&&hasFill1?row('Fill 1 filtered by 2.2σ (low side)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
       ${useApf6FillStats&&hasFill2?row('Fill 2 filtered by 2.2σ (low side)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
     </div>
@@ -1053,7 +996,7 @@ function buildPage(point, partDisplay, heatmap){
   body.appendChild(qtr);
   page.appendChild(body);
 
-  if(heatmap&&heatmap.grid&&heatmap.rows&&heatmap.positions&&heatmap.lsl!=null&&heatmap.usl!=null){
+  if(heatmap&&heatmap.grid&&heatmap.rows&&heatmap.positions&&(isApf6Point||(heatmap.lsl!=null&&heatmap.usl!=null))){
     const wrap=document.createElement('div'); wrap.className='connector-heatmap-wrap';
     const title=document.createElement('div'); title.className='connector-heatmap-title'; title.textContent='Pin press by position (connector layout)';
     wrap.appendChild(title);
@@ -1088,9 +1031,9 @@ function buildPage(point, partDisplay, heatmap){
       <span class="legend-gradient-wrap">
         <span class="legend-gradient" style="background:linear-gradient(to right, hsl(0,85%,45%), hsl(60,85%,45%), hsl(120,85%,45%))"></span>
       </span>
-      <span><span class="swatch legend-low" title="Low / At risk"></span> Low (at risk) — LSL ${fN(heatmap.lsl,4)}</span>
+      <span><span class="swatch legend-low" title="Low / At risk"></span> Low (at risk) — LSL ${heatmap.lsl!=null?fN(heatmap.lsl,4):'—'}</span>
       <span><span class="swatch legend-mid" title="Mid"></span> Mid</span>
-      <span><span class="swatch legend-high" title="High / Good"></span> High (good) — USL ${fN(heatmap.usl,4)}</span>
+      <span><span class="swatch legend-high" title="High / Good"></span> High (good) — USL ${heatmap.usl!=null?fN(heatmap.usl,4):'—'}</span>
       <span class="legend-divider"></span>
       <span><span class="swatch legend-empty"></span> Not measured</span>`;
     wrap.appendChild(legend);
