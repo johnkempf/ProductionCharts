@@ -490,13 +490,22 @@ function estimatedRange(data){
   return highAvg-lowAvg;
 }
 
+// Max number of points removed per dataset by the LSL-side tail rule (rest stay even if below threshold).
+const FILTER_OUTLIER_MAX = 3;
 // Remove points below mean - 2.2*sigma (LSL-side only). Used for capability/chart.
+// If more than FILTER_OUTLIER_MAX points qualify, only the lowest FILTER_OUTLIER_MAX values are removed.
 function filterOutliers3Sigma(data){
   if(!data||data.length<3) return data||[];
   const m=mean(data), s=stdDev(data);
   if(s<=0) return data;
   const lo=m-2.2*s;
-  return data.filter(x=>x>=lo);
+  const belowIdx=data.map((x,i)=>({x,i})).filter(({x})=>x<lo).sort((a,b)=>a.x-b.x);
+  if(belowIdx.length<=FILTER_OUTLIER_MAX){
+    const remove=new Set(belowIdx.map(({i})=>i));
+    return data.filter((_,i)=>!remove.has(i));
+  }
+  const remove=new Set(belowIdx.slice(0,FILTER_OUTLIER_MAX).map(({i})=>i));
+  return data.filter((_,i)=>!remove.has(i));
 }
 
 // ═══════════════════════════════════════════════
@@ -870,7 +879,7 @@ function buildPage(point, partDisplay, heatmap){
   const isApf6Part=/^APF6-/.test((partDisplay||'').toUpperCase());
   const minPpk=isApf6Part?0.85:1.0;
   const n=data.length, m=mean(data), s=stdDev(data);
-  // Capability uses lower-side 2.2-sigma filtering so low outliers don't skew Ppk
+  // Capability uses lower-side 2.2σ filtering (max 3 points removed per series) so tails don't dominate Ppk
   const dataForCap=filterOutliers3Sigma(data);
   const filteredOutCount=Math.max(0,data.length-dataForCap.length);
   const cap=lsl!==null?calcCapability(dataForCap,lsl,usl):null;
@@ -988,9 +997,9 @@ function buildPage(point, partDisplay, heatmap){
       ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
       ${row('PPM (DPMO) (observed)',  cap?cap.ppmObs:'—','',true)}
       ${row('PPM (DPMO) (expected)',  cap?cap.ppmExp:'—','',true)}
-      ${!useApf6FillStats?row('Filtered by 2.2σ (low side only)', `${filteredOutCount} of ${n}`,'',true):''}
-      ${useApf6FillStats&&hasFill1?row('Fill 1 filtered by 2.2σ (low side)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
-      ${useApf6FillStats&&hasFill2?row('Fill 2 filtered by 2.2σ (low side)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
+      ${!useApf6FillStats?row('Filtered by 2.2σ (low side, max 3)', `${filteredOutCount} of ${n}`,'',true):''}
+      ${useApf6FillStats&&hasFill1?row('Fill 1 filtered by 2.2σ (low side, max 3)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
+      ${useApf6FillStats&&hasFill2?row('Fill 2 filtered by 2.2σ (low side, max 3)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
     </div>
   `;
   body.appendChild(qtr);
