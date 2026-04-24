@@ -1,0 +1,738 @@
+// ═══════════════════════════════════════════════
+//  MATH
+// ═══════════════════════════════════════════════
+function mean(d){ return d.reduce((a,b)=>a+b,0)/d.length; }
+
+function stdDev(d){
+  if(d.length<2) return 0;
+  const m=mean(d);
+  return Math.sqrt(d.reduce((s,x)=>s+(x-m)**2,0)/(d.length-1));
+}
+
+function normalCDF(z){
+  const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  const sign=z<0?-1:1; z=Math.abs(z);
+  const t=1/(1+p*z);
+  const y=1-(((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t)*Math.exp(-z*z);
+  return 0.5*(1+sign*y);
+}
+function normalPDF(x,m,s){ return Math.exp(-0.5*((x-m)/s)**2)/(s*Math.sqrt(2*Math.PI)); }
+
+function normalPPF(p){
+  if(p<=0) return -6; if(p>=1) return 6;
+  const a=[-3.969683028665376e+01,2.209460984245205e+02,-2.759285104469687e+02,1.383577518672690e+02,-3.066479806614716e+01,2.506628277459239e+00];
+  const b=[-5.447609879822406e+01,1.615858368580409e+02,-1.556989798598866e+02,6.680131188771972e+01,-1.328068155288572e+01];
+  const c=[-7.784894002430293e-03,-3.223964580411365e-01,-2.400758277161838e+00,-2.549732539343734e+00,4.374664141464968e+00,2.938163982698783e+00];
+  const d=[7.784695709041462e-03,3.224671290700398e-01,2.445134137142996e+00,3.754408661907416e+00];
+  const pl=0.02425,ph=1-pl;
+  if(p<pl){ const q=Math.sqrt(-2*Math.log(p)); return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/(((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1)); }
+  if(p<=ph){ const q=p-0.5,r=q*q; return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1); }
+  const q=Math.sqrt(-2*Math.log(1-p)); return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/(((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1));
+}
+
+function histogram(data,bins){
+  const mn=Math.min(...data),mx=Math.max(...data);
+  const w=(mx-mn||1e-9)/bins;
+  const counts=new Array(bins).fill(0);
+  const edges=Array.from({length:bins+1},(_,i)=>mn+i*w);
+  data.forEach(x=>{ let i=Math.floor((x-mn)/w); if(i>=bins)i=bins-1; counts[i]++; });
+  return {counts,edges,binWidth:w};
+}
+
+function andersonDarling(data){
+  if(!data||data.length<3) return {stat:'N/A',pVal:'N/A',passed:null};
+  const n=data.length, m=mean(data), s=stdDev(data);
+  if(s===0) return {stat:'N/A',pVal:'N/A',passed:null};
+  const sorted=[...data].sort((a,b)=>a-b);
+  let S=0;
+  for(let i=0;i<n;i++){
+    const F=normalCDF((sorted[i]-m)/s);
+    const F2=normalCDF((sorted[n-1-i]-m)/s);
+    S+=(2*(i+1)-1)*(Math.log(Math.max(F,1e-15))+Math.log(Math.max(1-F2,1e-15)));
+  }
+  let A2=(-n-S/n)*(1+4/n-25/(n*n));
+  let pVal;
+  if(A2>=0.6)       pVal=Math.exp(1.2937-5.709*A2+0.0186*A2*A2);
+  else if(A2>=0.34) pVal=Math.exp(0.9177-4.279*A2-1.38*A2*A2);
+  else if(A2>=0.2)  pVal=1-Math.exp(-8.318+42.796*A2-59.938*A2*A2);
+  else              pVal=1-Math.exp(-13.436+101.14*A2-223.73*A2*A2);
+  pVal=Math.max(0.001,Math.min(0.999,pVal));
+  return {
+    stat: A2.toFixed(4),
+    pVal: pVal<0.005?'<0.005':pVal.toFixed(3),
+    passed: pVal>0.05
+  };
+}
+
+function calcCapability(data,lsl,usl){
+  if(!data||data.length<2) return null;
+  const m=mean(data),s=stdDev(data);
+  if(s<=0) return null;
+  const hasLsl=lsl!==null, hasUsl=usl!==null;
+  const ppl=hasLsl?(m-lsl)/(3*s):null;
+  const pp=hasLsl&&hasUsl?(usl-lsl)/(6*s):null;
+  const ppu=hasUsl?(usl-m)/(3*s):null;
+  const ppk=hasLsl&&hasUsl?Math.min(ppu,ppl):null;
+  const outBelowLsl=hasLsl?data.filter(x=>x<lsl).length:0;
+  const pB=hasLsl?normalCDF((lsl-m)/s):0, pA=hasUsl?1-normalCDF((usl-m)/s):0;
+  return {
+    pp, ppk, ppu, ppl,
+    ppkLsl: ppl,
+    zBench: ppl!==null?3*ppl:null,
+    pctObs:(outBelowLsl/data.length)*100, ppmObs:Math.round((outBelowLsl/data.length)*1e6),
+    pctExp:(pB*100), ppmExp:Math.round(pB*1e6),
+    mean:m, std:s
+  };
+}
+
+function meanOffTarget(data,target){
+  const n=data.length; if(n<2||target===null) return {off:false,p:'N/A'};
+  const m=mean(data),s=stdDev(data),se=s/Math.sqrt(n);
+  if(se===0) return {off:false,p:'1.000'};
+  const t=Math.abs((m-target)/se);
+  const p=2*(1-normalCDF(t));
+  return {off:p<0.05, p:p<0.001?'<0.001':p.toFixed(3)};
+}
+
+// Robust estimate of range using the average of the k lowest
+// and k highest points (k up to 3) to reduce sensitivity to outliers.
+function estimatedRange(data){
+  if(!data||data.length<2) return null;
+  const sorted=[...data].sort((a,b)=>a-b);
+  const k=Math.min(3,sorted.length);
+  const lowAvg=mean(sorted.slice(0,k));
+  const highAvg=mean(sorted.slice(-k));
+  return highAvg-lowAvg;
+}
+
+// Max number of points removed per dataset by the LSL-side tail rule (rest stay even if below threshold).
+const FILTER_OUTLIER_MAX = 3;
+// Remove points below mean - 2.2*sigma (LSL-side only). Used for capability/chart.
+// If more than FILTER_OUTLIER_MAX points qualify, only the lowest FILTER_OUTLIER_MAX values are removed.
+function filterOutliers3Sigma(data){
+  if(!data||data.length<3) return data||[];
+  const m=mean(data), s=stdDev(data);
+  if(s<=0) return data;
+  const lo=m-2.2*s;
+  const belowIdx=data.map((x,i)=>({x,i})).filter(({x})=>x<lo).sort((a,b)=>a.x-b.x);
+  if(belowIdx.length<=FILTER_OUTLIER_MAX){
+    const remove=new Set(belowIdx.map(({i})=>i));
+    return data.filter((_,i)=>!remove.has(i));
+  }
+  const remove=new Set(belowIdx.slice(0,FILTER_OUTLIER_MAX).map(({i})=>i));
+  return data.filter((_,i)=>!remove.has(i));
+}
+
+// ═══════════════════════════════════════════════
+//  PARSER
+// ═══════════════════════════════════════════════
+function parseVertex(content){
+  const lines=content.split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length) return null;
+  if(lines[0].split('\t')[0].replace(/"/g,'').trim()!==':BEGIN') return null;
+  let unit='mm',partDisplay=null,partPattern=null,dataStart=1;
+  for(let i=1;i<Math.min(lines.length,10);i++){
+    const raw=lines[i].trim();
+    const UP=raw.toUpperCase();
+    if(UP.includes('PATTERN:')){ partPattern=raw.split(/PATTERN:/i)[1].replace(/"/g,'').trim(); dataStart=i+1; continue; }
+    if(UP.includes('DISPLAY:')){ partDisplay=raw.split(/DISPLAY:/i)[1].replace(/"/g,'').trim(); dataStart=i+1; continue; }
+    if(UP.includes('UNIT:')){ unit=raw.split(/UNIT:/i)[1].replace(/"/g,'').trim(); dataStart=i+1; continue; }
+    const ff=raw.split('\t')[0].replace(/"/g,'').trim();
+    if(ff&&!ff.includes(':')){ dataStart=i; break; }
+  }
+  const segs=(partPattern||'').split('-');
+  const numPositions=Math.max(1,parseInt(segs[1],10)||100);
+  const numRows=Math.max(1,parseInt(segs[4],10)||4);
+  const heatmapGrid=Array.from({length:numRows},()=>Array(numPositions).fill(null));
+  let heatmapLsl=null, heatmapUsl=null;
+
+  // Determine connector family (for sampling + Pin 1 rules)
+  const pattern=(partPattern||'').toUpperCase();
+  const isApf6=/^APF6-/.test(pattern);
+  const isFemale=/^ADF6-/.test(pattern)||/^APF6-/.test(pattern);
+  const isMale=/^ADM6-/.test(pattern)||/^APM6-/.test(pattern);
+
+  // Track where the *first* valid heatmap data lands (for male parts)
+  let firstSampleRowIdx=null, firstSampleColIdx=null;
+
+  // For full-inspection runs (100% of pins measured), we also keep a
+  // generic list of all measurements so we can map every point directly
+  // to a row/column without any skipping pattern.
+  const allRawMeas=[]; // {rowIdx,sampleIdx,meas}
+
+  const map={};
+  for(let i=dataStart;i<lines.length;i++){
+    const parts=lines[i].split('\t').map(p=>p.replace(/"/g,'').trim());
+    if(parts.length<5) continue;
+    const crit=parts[0];
+    if(!crit||crit===':END'||crit.startsWith(':')) continue;
+    const meas=parseFloat(parts[1]),nom=parseFloat(parts[2]),upD=parseFloat(parts[3]),loD=parseFloat(parts[4]);
+    if(isNaN(meas)) continue;
+    const gk=crit.match(/^([A-Z]+\d+)/)?.[1]||crit;
+    if(!map[gk]){
+      map[gk]={
+        name:gk,
+        data:[],
+        lsl:null,
+        usl:null,
+        target:null,
+        subFeatures:[],
+        // For APF6 bimodal behavior
+        isApf6Point:isApf6,
+        fill1Data:[],
+        fill2Data:[]
+      };
+    }
+    map[gk].data.push(meas);
+    if(!map[gk].subFeatures.includes(crit)) map[gk].subFeatures.push(crit);
+    if(!isNaN(nom)&&!isNaN(upD)&&!isNaN(loD)){
+      if(map[gk].usl===null) map[gk].usl=r4(nom+upD);
+      if(map[gk].lsl===null) map[gk].lsl=r4(nom+loD);
+      if(map[gk].target===null) map[gk].target=r4(nom);
+      if(heatmapLsl===null){ heatmapLsl=r4(nom+loD); heatmapUsl=r4(nom+upD); }
+    }
+    const apf6Cell=isApf6?crit.match(/^[A-Z]+\d+_([A-Z])(\d+)$/i):null;
+    if(apf6Cell){
+      const rowLetter=apf6Cell[1].toUpperCase();
+      const rowIdx=rowLetter.charCodeAt(0)-65; // A=0, B=1, ...
+      const colNum=parseInt(apf6Cell[2],10);
+      const colIdx=colNum-1;
+      if(rowIdx>=0&&rowIdx<numRows&&colIdx>=0&&colIdx<numPositions){
+        heatmapGrid[rowIdx][colIdx]=meas;
+        allRawMeas.push({rowIdx,sampleIdx:colNum,meas});
+        if(colNum%2===1){
+          map[gk].fill1Data.push(meas);
+        }else{
+          map[gk].fill2Data.push(meas);
+        }
+      }
+      continue;
+    }
+
+    const rm=crit.match(/R(\d+)_(\d+)$/i);
+    if(rm){
+      const rowIdx=parseInt(rm[1],10)-1, sampleIdx=parseInt(rm[2],10);
+      if(rowIdx>=0&&rowIdx<numRows){
+        // Always keep a raw copy so we can handle full-inspection (N = rows*cols)
+        allRawMeas.push({rowIdx,sampleIdx,meas});
+        if(!isApf6){
+          // Default pattern for non-APF6: measure 1 column, then skip 5
+          const posIdx=Math.min((sampleIdx-1)*5,numPositions-1);
+          if(posIdx>=0&&posIdx<numPositions){
+            heatmapGrid[rowIdx][posIdx]=meas;
+            if(firstSampleRowIdx===null){
+              firstSampleRowIdx=rowIdx;
+              firstSampleColIdx=posIdx;
+            }
+          }
+        }
+      }
+    }
+  }
+  // If this is a full-inspection run (100% of pins measured), override any
+  // sampling patterns and map every measurement directly to its column index.
+  const fullInspection = Object.values(map).some(p=>p.data.length===numRows*numPositions);
+  if(fullInspection && allRawMeas.length){
+    for(let r=0;r<numRows;r++)
+      for(let c=0;c<numPositions;c++)
+        heatmapGrid[r][c]=null;
+    allRawMeas.forEach(({rowIdx,sampleIdx,meas})=>{
+      const colIdx=sampleIdx-1;
+      if(rowIdx>=0&&rowIdx<numRows&&colIdx>=0&&colIdx<numPositions){
+        heatmapGrid[rowIdx][colIdx]=meas;
+      }
+    });
+  }
+
+  const points=Object.values(map).filter(p=>p.data.length>0);
+  // Decide Pin 1 location based on connector family
+  let pin1RowIdx=null, pin1ColIdx=null, pin1Desc='';
+  if(isMale && firstSampleRowIdx!==null && firstSampleColIdx!==null){
+    // For ADM6 / APM6 (male): Pin 1 is the first data point provided in the file
+    pin1RowIdx=firstSampleRowIdx;
+    pin1ColIdx=firstSampleColIdx;
+    pin1Desc='Pin 1 = first data point provided in file';
+  }else if(isFemale){
+    // For ADF6 / APF6 (female): Pin 1 is the last measured pin in the first column
+    for(let r=numRows-1;r>=0;r--){
+      if(heatmapGrid[r][0]!=null){
+        pin1RowIdx=r;
+        pin1ColIdx=0;
+        break;
+      }
+    }
+    if(pin1RowIdx!==null){
+      pin1Desc='Pin 1 = last measured pin in first column';
+    }
+  }
+  // Fallback if nothing matched or no data found for those rules
+  if(pin1RowIdx===null || pin1ColIdx===null){
+    pin1RowIdx=Math.min(numRows-1,3);
+    pin1ColIdx=0;
+    pin1Desc='Pin 1 = default reference location';
+  }
+  return {
+    points,
+    unit,
+    partDisplay,
+    partPattern,
+    heatmapGrid,
+    heatmapRows:numRows,
+    heatmapPositions:numPositions,
+    heatmapLsl,
+    heatmapUsl,
+    heatmapPin1Row:pin1RowIdx,
+    heatmapPin1Col:pin1ColIdx,
+    heatmapPin1Desc:pin1Desc
+  };
+}
+
+function r4(v){ return Math.round(v*10000)/10000; }
+function heatmapColor(value,lsl,usl){
+  if(value==null||lsl==null||usl==null) return null;
+  const range=usl-lsl;
+  if(range<=0) return 'hsl(0,0%,60%)';
+  let t=(value-lsl)/range;
+  t=Math.max(0,Math.min(1,t));
+  const hue=120*t;
+  return `hsl(${hue}, 85%, 45%)`;
+}
+function fN(v,dec=4){
+  if(v===null||v===undefined||isNaN(v)) return 'N/A';
+  return (Math.round(v*Math.pow(10,dec))/Math.pow(10,dec)).toFixed(dec).replace(/(\.\d*[1-9])0+$/,'$1').replace(/\.0+$/,'');
+}
+function fmtPpk(v){
+  if(v===null||isNaN(v)) return {txt:'—',cls:''};
+  const n=Math.round(v*100)/100;
+  return {txt:n.toFixed(2), cls:n>=1.0?'good':n>=0.67?'marginal':'bad'};
+}
+
+// ═══════════════════════════════════════════════
+//  DRAW HISTOGRAM  (Minitab style)
+// ═══════════════════════════════════════════════
+function drawHistogram(canvas,point){
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const data=point.data,{lsl,usl,target}=point;
+  const m=mean(data),s=stdDev(data);
+  if(data.length<2||s===0){ ctx.fillStyle='#888';ctx.font='12px Arial';ctx.fillText('Insufficient data',10,H/2);return; }
+
+  // x domain
+  const specSpan=(usl!==null&&lsl!==null)?(usl-lsl):s*8;
+  const pad=Math.max(specSpan*0.18,s*1.0);
+  const xMin=Math.min(lsl??m-4*s,m-3.8*s)-pad;
+  const xMax=Math.max(usl??m+4*s,m+3.8*s)+pad;
+  const xRange=xMax-xMin;
+
+  const bins=Math.max(6,Math.min(20,Math.round(Math.sqrt(data.length)*1.8)));
+  const {counts,edges}=histogram(data,bins);
+  const bwData=edges[1]-edges[0];
+  const normalScale=data.length*bwData;
+  const peakN=normalPDF(m,m,s)*normalScale;
+  const yMax=Math.max(Math.max(...counts),peakN)*1.25;
+
+  const pl=44,pr=10,pt=24,pb=46;
+  const pw=W-pl-pr,ph=H-pt-pb;
+  const tx=v=>pl+(v-xMin)/xRange*pw;
+  const ty=v=>pt+ph-(v/yMax)*ph;
+
+  // bg
+  ctx.fillStyle='#fff';ctx.fillRect(pl,pt,pw,ph);
+
+  // horizontal grid
+  ctx.strokeStyle='#e0e0e0';ctx.lineWidth=0.8;
+  for(let i=0;i<=4;i++){ const y=pt+(i/4)*ph; ctx.beginPath();ctx.moveTo(pl,y);ctx.lineTo(pl+pw,y);ctx.stroke(); }
+
+  // bars
+  counts.forEach((cnt,i)=>{
+    if(!cnt) return;
+    const x1=tx(edges[i]),x2=tx(edges[i+1]);
+    const bw=Math.max(x2-x1-0.8,0.5),bh=(cnt/yMax)*ph,by=ty(cnt);
+    ctx.fillStyle='#5b9bd5';ctx.fillRect(x1,by,bw,bh);
+    ctx.strokeStyle='#3a7db5';ctx.lineWidth=0.7;ctx.strokeRect(x1,by,bw,bh);
+  });
+
+  // spec lines — LSL red (actionable), USL grey (reference only)
+  function specLine(xv,label,lineColor){
+    if(xv===null) return;
+    const col=lineColor||'#cc0000';
+    const x=tx(xv);
+    ctx.save();
+    ctx.strokeStyle=col;ctx.lineWidth=1.3;ctx.setLineDash([5,3]);
+    ctx.beginPath();ctx.moveTo(x,pt-4);ctx.lineTo(x,pt+ph);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=col;ctx.font='bold 10px Arial';ctx.textAlign='center';
+    ctx.fillText(label,x,pt-7);
+    ctx.restore();
+  }
+  specLine(lsl,'LSL');
+  specLine(usl,'USL','#888');
+
+  // target — green dashed
+  if(target!==null){
+    const x=tx(target);
+    ctx.save();
+    ctx.strokeStyle='#2a8a2a';ctx.lineWidth=1.1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(x,pt-4);ctx.lineTo(x,pt+ph);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#2a8a2a';ctx.font='bold 10px Arial';ctx.textAlign='center';
+    ctx.fillText('Target',x,pt-7);
+    ctx.restore();
+  }
+
+  // normal curve — dark red
+  ctx.save();ctx.strokeStyle='#c82020';ctx.lineWidth=2;
+  ctx.beginPath();
+  for(let px=0;px<=pw;px++){
+    const xv=xMin+(px/pw)*xRange;
+    const cy=ty(normalPDF(xv,m,s)*normalScale);
+    if(px===0) ctx.moveTo(pl+px,cy); else ctx.lineTo(pl+px,cy);
+  }
+  ctx.stroke();ctx.restore();
+
+  // axes
+  ctx.strokeStyle='#777';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pl,pt);ctx.lineTo(pl,pt+ph);ctx.lineTo(pl+pw,pt+ph);ctx.stroke();
+
+  // x ticks & labels
+  ctx.fillStyle='#333';ctx.font='9.5px Arial';ctx.textAlign='center';
+  const nxt=6;
+  for(let i=0;i<=nxt;i++){
+    const v=xMin+(i/nxt)*xRange,x=tx(v);
+    ctx.beginPath();ctx.moveTo(x,pt+ph);ctx.lineTo(x,pt+ph+3);ctx.stroke();
+    ctx.fillText(fN(v,4),x,pt+ph+14);
+  }
+  // y ticks
+  ctx.textAlign='right';
+  for(let i=0;i<=4;i++){
+    const v=Math.round((yMax/4)*i),y=ty(v);
+    ctx.beginPath();ctx.moveTo(pl,y);ctx.lineTo(pl-3,y);ctx.stroke();
+    ctx.fillText(v,pl-5,y+3.5);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  DRAW Q-Q PLOT
+// ═══════════════════════════════════════════════
+function drawQQ(canvas,data){
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const n=data.length;
+  if(n<3){ ctx.fillStyle='#888';ctx.font='10px Arial';ctx.fillText('Need ≥3',10,H/2);return; }
+  const sorted=[...data].sort((a,b)=>a-b);
+  const m=mean(data),s=stdDev(data);
+  const pts=sorted.map((v,i)=>({obs:v,theo:normalPPF((i+0.5)/n)}));
+  const theoVals=pts.map(p=>p.theo);
+  const obsVals=pts.map(p=>p.obs);
+  const tMin=Math.min(...theoVals),tMax=Math.max(...theoVals);
+  const oMin=Math.min(...obsVals),oMax=Math.max(...obsVals);
+  const tR=tMax-tMin||1,oR=oMax-oMin||s||1;
+  const tP=tR*0.12,oP=oR*0.12;
+  const xMin=tMin-tP,xMax=tMax+tP,yMin=oMin-oP,yMax=oMax+oP;
+  const pl=38,pr=6,pt=8,pb=28;
+  const pw=W-pl-pr,ph=H-pt-pb;
+  const tx=v=>pl+(v-xMin)/(xMax-xMin)*pw;
+  const ty=v=>pt+ph-(v-yMin)/(yMax-yMin)*ph;
+
+  ctx.fillStyle='#fff';ctx.fillRect(pl,pt,pw,ph);
+  ctx.strokeStyle='#e0e0e0';ctx.lineWidth=0.8;
+  for(let i=0;i<=4;i++){
+    const y=pt+(i/4)*ph; ctx.beginPath();ctx.moveTo(pl,y);ctx.lineTo(pl+pw,y);ctx.stroke();
+    const x=pl+(i/4)*pw; ctx.beginPath();ctx.moveTo(x,pt);ctx.lineTo(x,pt+ph);ctx.stroke();
+  }
+  // reference line
+  ctx.strokeStyle='#c82020';ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(tx(tMin),ty(m+tMin*s));
+  ctx.lineTo(tx(tMax),ty(m+tMax*s));
+  ctx.stroke();
+  // dots
+  ctx.fillStyle='#1e4b8f';
+  pts.forEach(({obs,theo})=>{
+    const cx=tx(theo),cy=ty(obs);
+    if(cx<pl-2||cx>pl+pw+2||cy<pt-2||cy>pt+ph+2) return;
+    ctx.beginPath();ctx.arc(cx,cy,2.2,0,Math.PI*2);ctx.fill();
+  });
+  // axes
+  ctx.strokeStyle='#777';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pl,pt);ctx.lineTo(pl,pt+ph);ctx.lineTo(pl+pw,pt+ph);ctx.stroke();
+  // x labels
+  ctx.fillStyle='#333';ctx.font='8.5px Arial';ctx.textAlign='center';
+  for(let i=0;i<=4;i++){
+    const v=xMin+(i/4)*(xMax-xMin),x=tx(v);
+    ctx.fillText(v.toFixed(1),x,pt+ph+10);
+  }
+  // y labels
+  ctx.textAlign='right';
+  for(let i=0;i<=4;i++){
+    const v=yMin+(i/4)*(yMax-yMin),y=ty(v);
+    ctx.fillText(fN(v,4),pl-3,y+3);
+  }
+  // axis label
+  ctx.fillStyle='#555';ctx.font='8px Arial';ctx.textAlign='center';
+  ctx.fillText('Theoretical Quantile',pl+pw/2,pt+ph+22);
+  ctx.save();ctx.translate(9,pt+ph/2);ctx.rotate(-Math.PI/2);
+  ctx.fillText('Observed Value',0,0);ctx.restore();
+}
+
+// ═══════════════════════════════════════════════
+//  STATUS
+// ═══════════════════════════════════════════════
+function getStatus(ppk, minPpk=1.0){
+  if(ppk===null||isNaN(ppk)) return {level:'warn',icon:'⚠️',head:'Assessment Unavailable',body:'No lower specification limit found for this critical. Verify inputs and spec limits before running.'};
+  if(ppk>=minPpk) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:`(Ppk ≥ ${minPpk.toFixed(2)}). Pin press is acceptable. No machine adjustment required. Continue running.`};
+  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:`(Ppk < ${minPpk.toFixed(2)}). Pins are pressed too far into the body. Stop production. Call a tech to adjust the press before continuing.`};
+}
+
+// ═══════════════════════════════════════════════
+//  BUILD MINITAB PAGE
+// ═══════════════════════════════════════════════
+function buildPage(point, partDisplay, heatmap){
+  const {data,lsl,usl,target,name}=point;
+  const isApf6Part=/^APF6-/.test((partDisplay||'').toUpperCase());
+  const minPpk=isApf6Part?0.85:1.0;
+  const n=data.length, m=mean(data), s=stdDev(data);
+  // Capability uses lower-side 2.2σ filtering (max 3 points removed per series) so tails don't dominate Ppk
+  const dataForCap=filterOutliers3Sigma(data);
+  const filteredOutCount=Math.max(0,data.length-dataForCap.length);
+  const cap=lsl!==null?calcCapability(dataForCap,lsl,usl):null;
+  const mot=meanOffTarget(data,target);
+  const ppkLsl=cap?cap.ppkLsl:null;
+  const isApf6Point=!!point.isApf6Point;
+  const fill1Data=isApf6Point?(point.fill1Data||[]):[];
+  const fill2Data=isApf6Point?(point.fill2Data||[]):[];
+  const fill1ForCap=isApf6Point?filterOutliers3Sigma(fill1Data):[];
+  const fill2ForCap=isApf6Point?filterOutliers3Sigma(fill2Data):[];
+  const fill1FilteredOut=Math.max(0,fill1Data.length-fill1ForCap.length);
+  const fill2FilteredOut=Math.max(0,fill2Data.length-fill2ForCap.length);
+  const hasFill1=isApf6Point && fill1Data.length>=2;
+  const hasFill2=isApf6Point && fill2Data.length>=2;
+  const useApf6FillStats=isApf6Point && (hasFill1||hasFill2);
+  // Capability per fill for APF6 (bimodal behavior); each fill filtered for outliers
+  let capFill1=null, capFill2=null, ppkFill1=null, ppkFill2=null;
+  if(isApf6Point && lsl!==null){
+    if(fill1Data.length>=2){
+      capFill1=calcCapability(fill1ForCap,lsl,usl);
+      ppkFill1=capFill1?capFill1.ppkLsl:null;
+    }
+    if(fill2Data.length>=2){
+      capFill2=calcCapability(fill2ForCap,lsl,usl);
+      ppkFill2=capFill2?capFill2.ppkLsl:null;
+    }
+  }
+  // For APF6: prefer fill-based status (lowest of the two fills). If fill mapping
+  // is unavailable (e.g., alternate critical naming format), fall back to overall
+  // one-sided Ppk from raw points so capability still renders.
+  let ppkWorst;
+  if(useApf6FillStats){
+    const candidates=[ppkFill1,ppkFill2].filter(v=>v!=null&&!isNaN(v));
+    ppkWorst=candidates.length?Math.min(...candidates):ppkLsl;
+  }else{
+    ppkWorst=ppkLsl;
+  }
+  const status=getStatus(ppkWorst,minPpk);
+  const ppkF=fmtPpk(ppkLsl);
+  const ppkFFill1=fmtPpk(ppkFill1);
+  const ppkFFill2=fmtPpk(ppkFill2);
+  const estRange=estimatedRange(data);
+
+  const page=document.createElement('div');
+  page.className='minitab-page';
+
+  // title
+  const td=document.createElement('div'); td.className='minitab-title';
+  td.innerHTML=`<div class="main">Capability Snapshot for ${name}</div>
+    <div class="sub">${partDisplay?'Part: '+partDisplay+' &nbsp;·&nbsp; ':''}Summary Report</div>`;
+  page.appendChild(td);
+
+  // ── Operator action banner (full-width, above chart/stats) ──
+  const qop=document.createElement('div'); qop.className='q-operator';
+  qop.innerHTML=`
+    <div style="display:flex;gap:16px;align-items:center">
+      <div style="flex:1">
+        <div class="operator-msg ${status.level}">
+          <div class="msg-head">${status.icon} ${status.head}</div>
+          ${status.body}
+        </div>
+      </div>
+
+    </div>
+  `;
+  page.appendChild(qop);
+
+  const body=document.createElement('div'); body.className='minitab-body';
+
+  // ── TL: Histogram ──
+  const qtl=document.createElement('div'); qtl.className='q-tl';
+  qtl.innerHTML='<div class="q-label">Histogram</div><div class="q-sublabel">Are the data inside the limits and close to the target?</div>';
+  const chartWrap=document.createElement('div'); chartWrap.className='chart-wrap';
+  const hc=document.createElement('canvas'); hc.width=500; hc.height=220;
+  hc.style.cssText='max-width:100%;height:auto;display:block;';
+  chartWrap.appendChild(hc);
+  const chartNote=document.createElement('p');
+  chartNote.className='chart-note';
+  chartNote.innerHTML='Capability is assessed using a <strong>one-sided Ppk vs. LSL only</strong>. Being near the lower spec is bad; exceeding the upper spec is acceptable while we hold our pins as close to the pcb as possible.';
+  chartWrap.appendChild(chartNote);
+  qtl.appendChild(chartWrap);
+  body.appendChild(qtl);
+
+  // ── TR: Stats panel ──
+  const qtr=document.createElement('div'); qtr.className='q-tr';
+  function row(lbl,val,cls='',indent=false){
+    return `<div class="stats-row-item${indent?' stats-indent':''}"><span class="lbl">${lbl}</span><span class="val ${cls}">${val}</span></div>`;
+  }
+  qtr.innerHTML=`
+    <div class="stats-section">
+      <div class="stats-section-title">Customer Requirements</div>
+      <table class="stats-req-table">
+        <thead><tr><th>Lower Spec</th><th>Target</th><th>Upper Spec</th></tr></thead>
+        <tbody><tr>
+          <td>${lsl!==null?fN(lsl,5):'—'}</td>
+          <td>${target!==null?fN(target,5):'—'}</td>
+          <td>${usl!==null?fN(usl,5):'—'}</td>
+        </tr></tbody>
+      </table>
+    </div>
+    <div class="stats-section">
+      <div class="stats-section-title">Process Characterization</div>
+      ${row('Total N', n)}
+      ${row('Mean', fN(m,7))}
+      ${row('Mean off target', mot.off?'<span class="bad">Yes</span>':'No','',true)}
+      ${row('P-value', mot.p,'',true)}
+      ${row('Standard deviation', fN(s,7))}
+      ${row('Estimated range', estRange!=null?fN(estRange,7):'—','',true)}
+      <div class="stats-section-sub">Capability statistics (one-sided vs LSL)</div>
+      ${useApf6FillStats&&hasFill1?row('Ppk Fill 1 (vs LSL)', ppkFill1!=null?ppkFFill1.txt:'—', ppkFFill1.cls,true):''}
+      ${useApf6FillStats&&hasFill2?row('Ppk Fill 2 (vs LSL)', ppkFill2!=null?ppkFFill2.txt:'—', ppkFFill2.cls,true):''}
+      ${!useApf6FillStats?row('Ppk (vs LSL)', cap?ppkF.txt:'—', ppkF.cls,true):''}
+      ${row('Z.Bench',  cap&&cap.zBench!=null?fN(cap.zBench,2):'—','',true)}
+      ${row('% Out of spec (observed)', cap?fN(cap.pctObs,2):'—','',true)}
+      ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
+      ${row('PPM (DPMO) (observed)',  cap?cap.ppmObs:'—','',true)}
+      ${row('PPM (DPMO) (expected)',  cap?cap.ppmExp:'—','',true)}
+      ${!useApf6FillStats?row('Filtered by 2.2σ (low side, max 3)', `${filteredOutCount} of ${n}`,'',true):''}
+      ${useApf6FillStats&&hasFill1?row('Fill 1 filtered by 2.2σ (low side, max 3)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
+      ${useApf6FillStats&&hasFill2?row('Fill 2 filtered by 2.2σ (low side, max 3)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
+    </div>
+  `;
+  body.appendChild(qtr);
+  page.appendChild(body);
+
+  if(heatmap&&heatmap.grid&&heatmap.rows&&heatmap.positions&&(isApf6Point||(heatmap.lsl!=null&&heatmap.usl!=null))){
+    const wrap=document.createElement('div'); wrap.className='connector-heatmap-wrap';
+    const title=document.createElement('div'); title.className='connector-heatmap-title'; title.textContent='Pin press by position (connector layout)';
+    wrap.appendChild(title);
+    const container=document.createElement('div'); container.className='connector-heatmap-container';
+    const gridEl=document.createElement('div');
+    gridEl.className='connector-heatmap';
+    gridEl.style.gridTemplateRows=`repeat(${heatmap.rows}, minmax(28px, 1fr))`;
+    gridEl.style.gridTemplateColumns=`repeat(${heatmap.positions}, minmax(0, 1fr))`;
+    const pin1Row=(typeof heatmap.pin1Row==='number')?heatmap.pin1Row:Math.min(heatmap.rows-1,3);
+    const pin1Col=(typeof heatmap.pin1Col==='number')?heatmap.pin1Col:0;
+    for(let r=0;r<heatmap.rows;r++)
+      for(let c=0;c<heatmap.positions;c++){
+        const cell=document.createElement('div');
+        cell.className='connector-heatmap-cell'+(r===pin1Row&&c===pin1Col?' pin-1':'');
+        const v=heatmap.grid[r][c];
+        const color=heatmapColor(v,heatmap.lsl,heatmap.usl);
+        if(color){ cell.style.background=color; cell.title=v!=null?`Row ${r+1} pos ${c+1}: ${v}`:''; }
+        if(r===pin1Row&&c===pin1Col){
+          const pin1Overlay=document.createElement('div');
+          pin1Overlay.className='pin-1-overlay';
+          pin1Overlay.setAttribute('aria-label','Pin 1');
+          pin1Overlay.textContent='1';
+          cell.appendChild(pin1Overlay);
+        }
+        gridEl.appendChild(cell);
+      }
+    container.appendChild(gridEl);
+    wrap.appendChild(container);
+    const legend=document.createElement('div'); legend.className='connector-heatmap-legend';
+    legend.innerHTML=`
+      <span class="legend-caption">Scale:</span>
+      <span class="legend-gradient-wrap">
+        <span class="legend-gradient" style="background:linear-gradient(to right, hsl(0,85%,45%), hsl(60,85%,45%), hsl(120,85%,45%))"></span>
+      </span>
+      <span><span class="swatch legend-low" title="Low / At risk"></span> Low (at risk) — LSL ${heatmap.lsl!=null?fN(heatmap.lsl,4):'—'}</span>
+      <span><span class="swatch legend-mid" title="Mid"></span> Mid</span>
+      <span><span class="swatch legend-high" title="High / Good"></span> High (good) — USL ${heatmap.usl!=null?fN(heatmap.usl,4):'—'}</span>
+      <span class="legend-divider"></span>
+      <span><span class="swatch legend-empty"></span> Not measured</span>`;
+    wrap.appendChild(legend);
+    page.appendChild(wrap);
+  }
+
+  setTimeout(()=>{ drawHistogram(hc, { ...point, data: dataForCap }); },0);
+  return page;
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════
+function renderResults(parsed,filename){
+  const {points,partDisplay,partPattern}=parsed;
+  const div=document.getElementById('results'); div.innerHTML='';
+  const part=partPattern||partDisplay||'—';
+
+  const strip=document.createElement('div'); strip.className='info-strip';
+  strip.innerHTML=`
+    <div class="info-item"><span class="info-label">Part Number</span><span class="info-value">${part}</span></div>
+    <div class="info-div"></div>
+    <div class="info-item"><span class="info-label">File</span><span class="info-value" style="font-size:11px;color:#444">${filename}</span></div>
+    <div class="info-div"></div>
+    <div class="info-item info-note"><span class="info-label">Note</span><span class="info-value">Please staple this chart to the back of the shop.</span></div>
+  `;
+  div.appendChild(strip);
+  const heatmap=parsed.heatmapGrid&&parsed.heatmapLsl!=null&&parsed.heatmapUsl!=null?{
+    grid:parsed.heatmapGrid,
+    rows:parsed.heatmapRows,
+    positions:parsed.heatmapPositions,
+    lsl:parsed.heatmapLsl,
+    usl:parsed.heatmapUsl,
+    pin1Row:parsed.heatmapPin1Row,
+    pin1Col:parsed.heatmapPin1Col,
+    pin1Desc:parsed.heatmapPin1Desc
+  }:null;
+  points.forEach(p=>div.appendChild(buildPage(p,part,heatmap)));
+  div.style.display='block';
+  document.getElementById('upload-wrap').style.display='none';
+  document.getElementById('hdr-actions').style.display='flex';
+  document.getElementById('hdr-part').textContent=part;
+}
+
+// ═══════════════════════════════════════════════
+//  APP WIRING
+// ═══════════════════════════════════════════════
+function printReport(){
+  const now=new Date();
+  const ts=now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})
+    +' at '+now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('print-timestamp').textContent='Printed: '+ts;
+  window.print();
+}
+function showError(msg){
+  const b=document.getElementById('error-box'); b.textContent='⚠️ '+msg; b.style.display='block';
+}
+function resetApp(){
+  document.getElementById('results').style.display='none';
+  document.getElementById('results').innerHTML='';
+  document.getElementById('upload-wrap').style.display='block';
+  document.getElementById('hdr-actions').style.display='none';
+  document.getElementById('hdr-part').textContent='Load a measurement file to begin';
+  document.getElementById('error-box').style.display='none';
+  document.getElementById('file-input').value='';
+}
+function hideError(){
+  document.getElementById('error-box').style.display='none';
+}
+
+window.printReport=printReport;
+window.resetApp=resetApp;
+window.ProductionChartsLegacy={
+  parseVertex,
+  renderResults,
+  showError,
+  hideError
+};
