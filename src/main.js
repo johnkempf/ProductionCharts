@@ -3,6 +3,7 @@ import { accelerateSeries } from "./series/accelerate/accelerateIndex.js";
 import { siflySeries } from "./series/sifly/siflyIndex.js";
 
 const handlers = [accelerateSeries, siflySeries];
+const FORCE_ACCELERATE_ROUTING = true;
 
 function getLegacyBridge() {
   if (!window.ProductionChartsLegacy) {
@@ -19,13 +20,14 @@ function processFile(file) {
     try {
       const content = String(event.target?.result || "");
       const { partText, handler } = pickSeriesHandler(content, handlers);
-      if (!handler) {
+      const selectedHandler = FORCE_ACCELERATE_ROUTING ? accelerateSeries : handler;
+      if (!selectedHandler) {
         legacy.showError(
           `Unrecognized part series${partText ? ` (${partText})` : ""}. Supported series: Accelerate (APM6/APF6/ADF6/ADM6) and Sifly.`
         );
         return;
       }
-      handler.renderFromFileContent(content, file.name, legacy);
+      selectedHandler.renderFromFileContent(content, file.name, legacy);
     } catch (error) {
       legacy.showError(`Parse error: ${error.message}`);
     }
