@@ -1,4 +1,4 @@
-const ACCELERATE_PREFIXES = ["APM6-", "APF6-", "ADF6-", "ADM6-"];
+const ACCELERATE_PREFIXES = ["APM6-", "APF6-", "ADF6-", "ADM6-", "ASP-"];
 
 function isAcceleratePart(partText) {
   return ACCELERATE_PREFIXES.some((prefix) => partText.startsWith(prefix));

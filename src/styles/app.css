@@ -206,6 +206,26 @@ canvas { display: block; }
 .stats-indent { padding-left: 14px; }
 .stats-section-sub { font-size: 11px; font-weight: 600; color: #333; margin: 5px 0 3px; }
 
+.sifly-legend {
+  margin-top: 10px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #333;
+}
+.sifly-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sifly-swatch {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
 /* print-only staple message (in blue header) */
 .print-staple-msg { display: none; }
 @media print {

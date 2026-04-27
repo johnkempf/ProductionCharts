@@ -3,7 +3,7 @@ import { accelerateSeries } from "./series/accelerate/accelerateIndex.js";
 import { siflySeries } from "./series/sifly/siflyIndex.js";
 
 const handlers = [accelerateSeries, siflySeries];
-const FORCE_ACCELERATE_ROUTING = true;
+const FORCE_ACCELERATE_ROUTING = false;
 
 function getLegacyBridge() {
   if (!window.ProductionChartsLegacy) {

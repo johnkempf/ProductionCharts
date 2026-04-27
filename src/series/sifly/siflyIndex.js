@@ -4,9 +4,9 @@ export const siflySeries = {
   id: "sifly",
   label: "Sifly",
   matchesPart(partText) {
-    return partText.startsWith("SIFLY-");
+    return partText.includes("SUB-");
   },
-  renderFromFileContent(_content, _fileName, legacy) {
-    renderSiflyPlaceholder(legacy);
+  renderFromFileContent(content, fileName, legacy) {
+    renderSiflyPlaceholder(content, fileName, legacy);
   }
 };
