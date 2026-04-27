@@ -105,21 +105,22 @@ function estimatedRange(data){
   return highAvg-lowAvg;
 }
 
-// Max number of points removed per dataset by the LSL-side tail rule (rest stay even if below threshold).
+// Max number of points removed per dataset, per tail (low/high).
 const FILTER_OUTLIER_MAX = 3;
-// Remove points below mean - 2.2*sigma (LSL-side only). Used for capability/chart.
-// If more than FILTER_OUTLIER_MAX points qualify, only the lowest FILTER_OUTLIER_MAX values are removed.
+// Remove points beyond mean +/- 2.2*sigma on both tails. Used for capability/chart.
+// If more than FILTER_OUTLIER_MAX points qualify on a side, only the most extreme
+// FILTER_OUTLIER_MAX values are removed for that side.
 function filterOutliers3Sigma(data){
   if(!data||data.length<3) return data||[];
   const m=mean(data), s=stdDev(data);
   if(s<=0) return data;
-  const lo=m-2.2*s;
+  const lo=m-2.2*s, hi=m+2.2*s;
   const belowIdx=data.map((x,i)=>({x,i})).filter(({x})=>x<lo).sort((a,b)=>a.x-b.x);
-  if(belowIdx.length<=FILTER_OUTLIER_MAX){
-    const remove=new Set(belowIdx.map(({i})=>i));
-    return data.filter((_,i)=>!remove.has(i));
-  }
-  const remove=new Set(belowIdx.slice(0,FILTER_OUTLIER_MAX).map(({i})=>i));
+  const aboveIdx=data.map((x,i)=>({x,i})).filter(({x})=>x>hi).sort((a,b)=>b.x-a.x);
+  const remove=new Set([
+    ...belowIdx.slice(0,FILTER_OUTLIER_MAX).map(({i})=>i),
+    ...aboveIdx.slice(0,FILTER_OUTLIER_MAX).map(({i})=>i)
+  ]);
   return data.filter((_,i)=>!remove.has(i));
 }
 
@@ -288,6 +289,9 @@ function parseVertex(content){
 }
 
 function r4(v){ return Math.round(v*10000)/10000; }
+// Relaxed high-side advisory threshold (zUSL = (USL-mean)/sigma).
+// Lower values mean the process center is very close to the USL.
+const HIGH_SIDE_ZUSL_MIN = 0.85;
 function heatmapColor(value,lsl,usl){
   if(value==null||lsl==null||usl==null) return null;
   const range=usl-lsl;
@@ -480,10 +484,20 @@ function drawQQ(canvas,data){
 // ═══════════════════════════════════════════════
 //  STATUS
 // ═══════════════════════════════════════════════
-function getStatus(ppk, minPpk=1.0){
+function getStatus(ppk, minPpk=1.0, highSide={}){
   if(ppk===null||isNaN(ppk)) return {level:'warn',icon:'⚠️',head:'Assessment Unavailable',body:'No lower specification limit found for this critical. Verify inputs and spec limits before running.'};
-  if(ppk>=minPpk) return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:`(Ppk ≥ ${minPpk.toFixed(2)}). Pin press is acceptable. No machine adjustment required. Continue running.`};
-  return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:`(Ppk < ${minPpk.toFixed(2)}). Pins are pressed too far into the body. Stop production. Call a tech to adjust the press before continuing.`};
+  if(ppk<minPpk){
+    return {level:'fail',icon:'🔴',head:'STOP — CALL A TECHNICIAN',body:`(Ppk < ${minPpk.toFixed(2)}). Pins are pressed too far into the body (toward LSL). Stop production. Call a tech to adjust the press before continuing.`};
+  }
+  if(highSide.tooClose){
+    return {
+      level:'fail',
+      icon:'🔴',
+      head:'STOP — CALL A TECHNICIAN',
+      body:`(zUSL ${fN(highSide.zUsl,2)} < ${fN(HIGH_SIDE_ZUSL_MIN,2)}). Pins are too far out of the body (toward USL). Stop production. Call a tech to adjust the press before continuing.`
+    };
+  }
+  return {level:'ok',icon:'✅',head:'CONTINUE RUNNING',body:`(Ppk ≥ ${minPpk.toFixed(2)}). Pin press is acceptable. No machine adjustment required. Continue running.`};
 }
 
 // ═══════════════════════════════════════════════
@@ -494,7 +508,7 @@ function buildPage(point, partDisplay, heatmap){
   const isApf6Part=/^APF6-/.test((partDisplay||'').toUpperCase());
   const minPpk=isApf6Part?0.85:1.0;
   const n=data.length, m=mean(data), s=stdDev(data);
-  // Capability uses lower-side 2.2σ filtering (max 3 points removed per series) so tails don't dominate Ppk
+  // Capability uses two-sided 2.2σ filtering (max 3 per side) so tails don't dominate Ppk
   const dataForCap=filterOutliers3Sigma(data);
   const filteredOutCount=Math.max(0,data.length-dataForCap.length);
   const cap=lsl!==null?calcCapability(dataForCap,lsl,usl):null;
@@ -532,7 +546,9 @@ function buildPage(point, partDisplay, heatmap){
   }else{
     ppkWorst=ppkLsl;
   }
-  const status=getStatus(ppkWorst,minPpk);
+  const zUsl=cap&&cap.ppu!=null?3*cap.ppu:null;
+  const highSideTooClose=zUsl!=null&&zUsl<HIGH_SIDE_ZUSL_MIN;
+  const status=getStatus(ppkWorst,minPpk,{zUsl,tooClose:highSideTooClose});
   const ppkF=fmtPpk(ppkLsl);
   const ppkFFill1=fmtPpk(ppkFill1);
   const ppkFFill2=fmtPpk(ppkFill2);
@@ -612,9 +628,10 @@ function buildPage(point, partDisplay, heatmap){
       ${row('% Out of spec (expected)', cap?fN(cap.pctExp,2):'—','',true)}
       ${row('PPM (DPMO) (observed)',  cap?cap.ppmObs:'—','',true)}
       ${row('PPM (DPMO) (expected)',  cap?cap.ppmExp:'—','',true)}
-      ${!useApf6FillStats?row('Filtered by 2.2σ (low side, max 3)', `${filteredOutCount} of ${n}`,'',true):''}
-      ${useApf6FillStats&&hasFill1?row('Fill 1 filtered by 2.2σ (low side, max 3)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
-      ${useApf6FillStats&&hasFill2?row('Fill 2 filtered by 2.2σ (low side, max 3)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
+      ${row('High-side margin zUSL ((USL - Mean) / Std Dev)', zUsl!=null?fN(zUsl,2):'—', highSideTooClose?'bad':'',true)}
+      ${!useApf6FillStats?row('Filtered by 2.2σ (both sides, max 3/side)', `${filteredOutCount} of ${n}`,'',true):''}
+      ${useApf6FillStats&&hasFill1?row('Fill 1 filtered by 2.2σ (both sides, max 3/side)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
+      ${useApf6FillStats&&hasFill2?row('Fill 2 filtered by 2.2σ (both sides, max 3/side)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
     </div>
   `;
   body.appendChild(qtr);
