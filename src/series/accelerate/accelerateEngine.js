@@ -107,21 +107,45 @@ function estimatedRange(data){
 
 // Max number of points removed per dataset, per tail (low/high).
 const FILTER_OUTLIER_MAX = 3;
-// Remove points beyond mean +/- 2.2*sigma on both tails. Used for capability/chart.
+// Sigma threshold for two-sided outlier filtering used by capability/chart.
+const FILTER_OUTLIER_SIGMA = 3.5;
+// Remove points beyond mean +/- FILTER_OUTLIER_SIGMA*sigma on both tails. Used for capability/chart.
 // If more than FILTER_OUTLIER_MAX points qualify on a side, only the most extreme
 // FILTER_OUTLIER_MAX values are removed for that side.
-function filterOutliers3Sigma(data){
-  if(!data||data.length<3) return data||[];
+function analyzeOutliersSigma(data){
+  if(!data||data.length<3){
+    return {
+      filteredData:data||[],
+      lowerFiltered:[],
+      upperFiltered:[]
+    };
+  }
   const m=mean(data), s=stdDev(data);
-  if(s<=0) return data;
-  const lo=m-2.2*s, hi=m+2.2*s;
+  if(s<=0){
+    return {
+      filteredData:data,
+      lowerFiltered:[],
+      upperFiltered:[]
+    };
+  }
+  const lo=m-FILTER_OUTLIER_SIGMA*s, hi=m+FILTER_OUTLIER_SIGMA*s;
   const belowIdx=data.map((x,i)=>({x,i})).filter(({x})=>x<lo).sort((a,b)=>a.x-b.x);
   const aboveIdx=data.map((x,i)=>({x,i})).filter(({x})=>x>hi).sort((a,b)=>b.x-a.x);
+  const lowerFiltered=belowIdx.slice(0,FILTER_OUTLIER_MAX);
+  const upperFiltered=aboveIdx.slice(0,FILTER_OUTLIER_MAX);
   const remove=new Set([
-    ...belowIdx.slice(0,FILTER_OUTLIER_MAX).map(({i})=>i),
-    ...aboveIdx.slice(0,FILTER_OUTLIER_MAX).map(({i})=>i)
+    ...lowerFiltered.map(({i})=>i),
+    ...upperFiltered.map(({i})=>i)
   ]);
-  return data.filter((_,i)=>!remove.has(i));
+  return {
+    filteredData:data.filter((_,i)=>!remove.has(i)),
+    lowerFiltered:lowerFiltered.map(({x})=>x),
+    upperFiltered:upperFiltered.map(({x})=>x)
+  };
+}
+
+function filterOutliers3Sigma(data){
+  return analyzeOutliersSigma(data).filteredData;
 }
 
 // ═══════════════════════════════════════════════
@@ -508,19 +532,29 @@ function buildPage(point, partDisplay, heatmap){
   const isApf6Part=/^APF6-/.test((partDisplay||'').toUpperCase());
   const minPpk=isApf6Part?0.85:1.0;
   const n=data.length, m=mean(data), s=stdDev(data);
-  // Capability uses two-sided 2.2σ filtering (max 3 per side) so tails don't dominate Ppk
-  const dataForCap=filterOutliers3Sigma(data);
-  const filteredOutCount=Math.max(0,data.length-dataForCap.length);
+  // Capability uses two-sided sigma filtering (max 3 per side) so tails don't dominate Ppk
+  const outlierInfo=analyzeOutliersSigma(data);
+  const dataForCap=outlierInfo.filteredData;
+  const lowerFilteredCount=outlierInfo.lowerFiltered.length;
+  const upperFilteredCount=outlierInfo.upperFiltered.length;
+  const lowerFilteredValues=outlierInfo.lowerFiltered.length?outlierInfo.lowerFiltered.map(v=>fN(v,5)).join(', '):'—';
+  const upperFilteredValues=outlierInfo.upperFiltered.length?outlierInfo.upperFiltered.map(v=>fN(v,5)).join(', '):'—';
   const cap=lsl!==null?calcCapability(dataForCap,lsl,usl):null;
   const mot=meanOffTarget(data,target);
   const ppkLsl=cap?cap.ppkLsl:null;
   const isApf6Point=!!point.isApf6Point;
   const fill1Data=isApf6Point?(point.fill1Data||[]):[];
   const fill2Data=isApf6Point?(point.fill2Data||[]):[];
-  const fill1ForCap=isApf6Point?filterOutliers3Sigma(fill1Data):[];
-  const fill2ForCap=isApf6Point?filterOutliers3Sigma(fill2Data):[];
+  const fill1OutlierInfo=isApf6Point?analyzeOutliersSigma(fill1Data):{filteredData:[],lowerFiltered:[],upperFiltered:[]};
+  const fill2OutlierInfo=isApf6Point?analyzeOutliersSigma(fill2Data):{filteredData:[],lowerFiltered:[],upperFiltered:[]};
+  const fill1ForCap=isApf6Point?fill1OutlierInfo.filteredData:[];
+  const fill2ForCap=isApf6Point?fill2OutlierInfo.filteredData:[];
   const fill1FilteredOut=Math.max(0,fill1Data.length-fill1ForCap.length);
   const fill2FilteredOut=Math.max(0,fill2Data.length-fill2ForCap.length);
+  const fill1LowerFilteredValues=fill1OutlierInfo.lowerFiltered.length?fill1OutlierInfo.lowerFiltered.map(v=>fN(v,5)).join(', '):'—';
+  const fill1UpperFilteredValues=fill1OutlierInfo.upperFiltered.length?fill1OutlierInfo.upperFiltered.map(v=>fN(v,5)).join(', '):'—';
+  const fill2LowerFilteredValues=fill2OutlierInfo.lowerFiltered.length?fill2OutlierInfo.lowerFiltered.map(v=>fN(v,5)).join(', '):'—';
+  const fill2UpperFilteredValues=fill2OutlierInfo.upperFiltered.length?fill2OutlierInfo.upperFiltered.map(v=>fN(v,5)).join(', '):'—';
   const hasFill1=isApf6Point && fill1Data.length>=2;
   const hasFill2=isApf6Point && fill2Data.length>=2;
   const useApf6FillStats=isApf6Point && (hasFill1||hasFill2);
@@ -629,9 +663,16 @@ function buildPage(point, partDisplay, heatmap){
       ${row('PPM (DPMO) (observed)',  cap?cap.ppmObs:'—','',true)}
       ${row('PPM (DPMO) (expected)',  cap?cap.ppmExp:'—','',true)}
       ${row('High-side margin zUSL ((USL - Mean) / Std Dev)', zUsl!=null?fN(zUsl,2):'—', highSideTooClose?'bad':'',true)}
-      ${!useApf6FillStats?row('Filtered by 2.2σ (both sides, max 3/side)', `${filteredOutCount} of ${n}`,'',true):''}
-      ${useApf6FillStats&&hasFill1?row('Fill 1 filtered by 2.2σ (both sides, max 3/side)', `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
-      ${useApf6FillStats&&hasFill2?row('Fill 2 filtered by 2.2σ (both sides, max 3/side)', `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
+      ${!useApf6FillStats&&lowerFilteredCount>0?row('Outlier points filtered (low side)', `${lowerFilteredCount}`,'',true):''}
+      ${!useApf6FillStats&&lowerFilteredCount>0?row('Outlier point values filtered (low side)', lowerFilteredValues,'',true):''}
+      ${!useApf6FillStats&&upperFilteredCount>0?row('Outlier points filtered (high side)', `${upperFilteredCount}`,'',true):''}
+      ${!useApf6FillStats&&upperFilteredCount>0?row('Outlier point values filtered (high side)', upperFilteredValues,'',true):''}
+      ${useApf6FillStats&&hasFill1?row(`Fill 1 outlier points filtered (${fN(FILTER_OUTLIER_SIGMA,1)}σ, max 3/side)`, `${fill1FilteredOut} of ${fill1Data.length}`,'',true):''}
+      ${useApf6FillStats&&hasFill1&&fill1OutlierInfo.lowerFiltered.length>0?row('Fill 1 outlier values filtered (low side)', fill1LowerFilteredValues,'',true):''}
+      ${useApf6FillStats&&hasFill1&&fill1OutlierInfo.upperFiltered.length>0?row('Fill 1 outlier values filtered (high side)', fill1UpperFilteredValues,'',true):''}
+      ${useApf6FillStats&&hasFill2?row(`Fill 2 outlier points filtered (${fN(FILTER_OUTLIER_SIGMA,1)}σ, max 3/side)`, `${fill2FilteredOut} of ${fill2Data.length}`,'',true):''}
+      ${useApf6FillStats&&hasFill2&&fill2OutlierInfo.lowerFiltered.length>0?row('Fill 2 outlier values filtered (low side)', fill2LowerFilteredValues,'',true):''}
+      ${useApf6FillStats&&hasFill2&&fill2OutlierInfo.upperFiltered.length>0?row('Fill 2 outlier values filtered (high side)', fill2UpperFilteredValues,'',true):''}
     </div>
   `;
   body.appendChild(qtr);
